@@ -1,12 +1,14 @@
 from flask import Flask, request, jsonify
 import requests
 import os
+import time
 
 app = Flask(__name__)
 
 API_KEY = os.environ.get("INDEXALPHA_API_KEY")
 BASE_URL = "https://api.indexalpha.id"
-
+CACHE = {}
+CACHE_TTL = 60 * 60 * 24
 @app.after_request
 def add_cors_headers(response):
     response.headers["Access-Control-Allow-Origin"] = "*"
@@ -39,6 +41,23 @@ def broker():
             "error": "INDEXALPHA_API_KEY belum dipasang di Render"
         }), 500
 
+    # Kunci cache berdasarkan saham + tanggal
+    cache_key = f"{ticker}_{date_from}_{date_to}"
+
+    # Cek apakah data sudah pernah diambil
+    if cache_key in CACHE:
+        cached = CACHE[cache_key]
+
+        umur = time.time() - cached["time"]
+
+        if umur < CACHE_TTL:
+            result = jsonify(cached["data"])
+            result.headers["X-StockRadar-Cache"] = "HIT"
+            return result, cached["status"]
+
+        else:
+            del CACHE[cache_key]
+
     try:
         response = requests.get(
             f"{BASE_URL}/stocks/broker-summary",
@@ -56,7 +75,20 @@ def broker():
             timeout=20
         )
 
-        return jsonify(response.json()), response.status_code
+        data = response.json()
+
+        # Hanya simpan kalau request berhasil
+        if response.status_code == 200:
+            CACHE[cache_key] = {
+                "time": time.time(),
+                "data": data,
+                "status": response.status_code
+            }
+
+        result = jsonify(data)
+        result.headers["X-StockRadar-Cache"] = "MISS"
+
+        return result, response.status_code
 
     except Exception as e:
         return jsonify({

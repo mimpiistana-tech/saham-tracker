@@ -6,6 +6,7 @@
 <meta name="theme-color" content="#07111f">
 <title>StockRadar</title>
 <link rel="manifest" href="manifest.json">
+
 <style>
 *{box-sizing:border-box}
 body{margin:0;background:#07111f;color:#edf5ff;font-family:Arial,sans-serif}
@@ -30,7 +31,8 @@ th,td{text-align:left;padding:10px 5px;border-bottom:1px solid #18334b;font-size
 th{font-size:11px;color:#8096ad}
 .badge{padding:5px 8px;border-radius:9px;background:#103b31;color:#18e6a2;font-size:11px}
 .score{font-weight:bold;color:#18e6a2}
-input{width:100%;padding:12px;border-radius:11px;border:1px solid #1d3b56;background:#081522;color:white}
+input{width:100%;padding:12px;border-radius:11px;border:1px solid #1d3b56;background:#081522;color:white;margin-bottom:8px}
+.action{width:100%;padding:12px;border:0;border-radius:11px;background:#18e6a2;color:#001a12;font-weight:800;margin-bottom:12px}
 .nav{position:fixed;bottom:0;left:0;right:0;background:#081625;border-top:1px solid #18334c;padding:14px;text-align:center;color:#91a6bb}
 .nav span{margin:0 12px}
 </style>
@@ -49,13 +51,13 @@ input{width:100%;padding:12px;border-radius:11px;border:1px solid #1d3b56;backgr
 
 <div class="card hero">
 <h2>🔥 Radar Hari Ini</h2>
-<div class="muted">Prototype — data masih contoh.</div>
+<div class="muted">Broker sudah memakai data real. Fitur lain masih prototype.</div>
 
 <div class="grid" style="margin-top:12px">
-<div class="tile">🏦<b>Broker</b><span class="green">Akumulasi</span></div>
-<div class="tile">📊<b>Volume</b><span class="yellow">Naik</span></div>
-<div class="tile">📰<b>Corporate Action</b><span>3 terdeteksi</span></div>
-<div class="tile">🐋<b>Big Player</b><span class="green">Pantau</span></div>
+<div class="tile">🏦<b>Broker</b><span class="green">LIVE</span></div>
+<div class="tile">📊<b>Volume</b><span class="yellow">Segera</span></div>
+<div class="tile">📰<b>Corporate Action</b><span>Segera</span></div>
+<div class="tile">🐋<b>Big Player</b><span class="green">Segera</span></div>
 </div>
 </div>
 
@@ -80,22 +82,55 @@ input{width:100%;padding:12px;border-radius:11px;border:1px solid #1d3b56;backgr
 </thead>
 <tbody id="rows"></tbody>
 </table>
+
+<div class="muted" style="margin-top:10px">
+Top Radar masih data contoh.
+</div>
 </section>
 
 <section id="broker" class="card" style="display:none">
-<h2>🏦 Broker Radar</h2>
-<p><b>CC</b> <span class="green">Net Buy +12,4M</span></p>
-<p><b>XC</b> <span class="green">Net Buy +9,1M</span></p>
-<p><b>YP</b> <span class="yellow">Campuran</span></p>
-<p><b>ZP</b> <span class="red">Net Sell -7,3M</span></p>
-<div class="muted">Nanti bagian ini bisa dibuat otomatis dari data broker BEI.</div>
+<h2>🏦 Broker Radar — Data Real</h2>
+
+<input id="brokerTicker" value="BBRI" placeholder="Kode saham, contoh BBRI">
+<input id="brokerDate" type="date">
+
+<button class="action" onclick="loadBroker()">
+🔎 Cek Broker
+</button>
+
+<div id="brokerStatus" class="muted" style="margin-bottom:10px">
+Masukkan saham lalu tekan Cek Broker.
+</div>
+
+<div style="overflow-x:auto">
+<table>
+<thead>
+<tr>
+<th>Broker</th>
+<th>Buy</th>
+<th>Sell</th>
+<th>Net</th>
+</tr>
+</thead>
+<tbody id="brokerRows"></tbody>
+</table>
+</div>
+
+<div class="muted" style="margin-top:10px">
+Hijau = Net Buy • Merah = Net Sell
+</div>
 </section>
 
 <section id="ca" class="card" style="display:none">
 <h2>📰 Corporate Action Radar</h2>
+
 <p><b>NAYZ</b> — contoh: akuisisi</p>
 <p><b>PIPA</b> — contoh: RUPS</p>
 <p><b>RANS</b> — contoh: rencana aksi korporasi</p>
+
+<div class="muted">
+Corporate Action real kita sambungkan setelah Broker selesai.
+</div>
 </section>
 
 </div>
@@ -107,40 +142,181 @@ input{width:100%;padding:12px;border-radius:11px;border:1px solid #1d3b56;backgr
 </div>
 
 <script>
+
+const API_BASE="https://saham-tracker-api.onrender.com";
+
 const data=[
-['NAYZ','170',82,'Akumulasi'],
-['PIPA','222',76,'Pantau'],
-['RANS','170',71,'Volume'],
-['MEJA','420',69,'Pantau'],
-['BIPI','1020',64,'Pantau']
+["NAYZ","170",82,"Akumulasi"],
+["PIPA","222",76,"Pantau"],
+["RANS","170",71,"Volume"],
+["MEJA","420",69,"Pantau"],
+["BIPI","1020",64,"Pantau"]
 ];
 
 function draw(list=data){
-document.getElementById('rows').innerHTML=list.map(x=>
-`<tr>
+document.getElementById("rows").innerHTML=list.map(x=>`
+<tr>
 <td><b>${x[0]}</b></td>
 <td>${x[1]}</td>
 <td class="score">${x[2]}</td>
 <td><span class="badge">${x[3]}</span></td>
-</tr>`
-).join('');
+</tr>
+`).join("");
 }
 
 function filter(){
-let q=document.getElementById('search').value.toUpperCase();
+let q=document.getElementById("search").value.toUpperCase();
 draw(data.filter(x=>x[0].includes(q)));
 }
 
 function show(id,btn){
-['radar','broker','ca'].forEach(x=>
-document.getElementById(x).style.display=x===id?'block':'none'
-);
-document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));
-btn.classList.add('active');
+["radar","broker","ca"].forEach(x=>{
+document.getElementById(x).style.display=x===id?"block":"none";
+});
+
+document.querySelectorAll(".tab").forEach(x=>x.classList.remove("active"));
+btn.classList.add("active");
+}
+
+function angka(n){
+n=Number(n||0);
+let a=Math.abs(n);
+
+if(a>=1000000000000) return (n/1000000000000).toFixed(1)+"T";
+if(a>=1000000000) return (n/1000000000).toFixed(1)+"M";
+if(a>=1000000) return (n/1000000).toFixed(1)+"jt";
+if(a>=1000) return (n/1000).toFixed(1)+"rb";
+
+return Math.round(n).toLocaleString("id-ID");
+}
+
+function cariDataBroker(json){
+
+if(Array.isArray(json)) return json;
+
+if(Array.isArray(json.data)) return json.data;
+
+if(json.data && Array.isArray(json.data.data))
+return json.data.data;
+
+if(Array.isArray(json.result))
+return json.result;
+
+if(Array.isArray(json.brokers))
+return json.brokers;
+
+return [];
+}
+
+async function loadBroker(){
+
+const ticker=document
+.getElementById("brokerTicker")
+.value
+.trim()
+.toUpperCase();
+
+const tanggal=document.getElementById("brokerDate").value;
+
+const status=document.getElementById("brokerStatus");
+const rows=document.getElementById("brokerRows");
+
+if(!ticker){
+status.innerHTML="Masukkan kode saham dulu.";
+return;
+}
+
+if(!tanggal){
+status.innerHTML="Pilih tanggal dulu.";
+return;
+}
+
+status.innerHTML="⏳ Mengambil data "+ticker+"...";
+rows.innerHTML="";
+
+try{
+
+const url=
+`${API_BASE}/api/broker?ticker=${encodeURIComponent(ticker)}&from=${tanggal}&to=${tanggal}`;
+
+const response=await fetch(url);
+const json=await response.json();
+
+if(!response.ok){
+throw new Error(json.error || "API gagal");
+}
+
+let broker=cariDataBroker(json);
+
+if(!broker.length){
+status.innerHTML="Data broker tidak ditemukan untuk tanggal tersebut.";
+return;
+}
+
+broker.sort((a,b)=>{
+const netA=Number(a.buy_value||0)-Number(a.sell_value||0);
+const netB=Number(b.buy_value||0)-Number(b.sell_value||0);
+return netB-netA;
+});
+
+broker=broker.slice(0,20);
+
+rows.innerHTML=broker.map(x=>{
+
+const buy=Number(x.buy_value||0);
+const sell=Number(x.sell_value||0);
+const net=buy-sell;
+
+const warna=net>=0?"green":"red";
+const tanda=net>=0?"+":"";
+
+return `
+<tr>
+<td><b>${x.code || "-"}</b></td>
+<td>${angka(buy)}</td>
+<td>${angka(sell)}</td>
+<td class="${warna}"><b>${tanda}${angka(net)}</b></td>
+</tr>
+`;
+
+}).join("");
+
+status.innerHTML=
+`✅ ${ticker} • ${tanggal} • ${broker.length} broker teratas`;
+
+}catch(error){
+
+status.innerHTML=
+`❌ Gagal mengambil data: ${error.message}`;
+
+}
+
+}
+
+function tanggalDefault(){
+
+let d=new Date();
+
+if(d.getDay()===0){
+d.setDate(d.getDate()-2);
+}
+
+if(d.getDay()===6){
+d.setDate(d.getDate()-1);
+}
+
+const y=d.getFullYear();
+const m=String(d.getMonth()+1).padStart(2,"0");
+const day=String(d.getDate()).padStart(2,"0");
+
+document.getElementById("brokerDate").value=
+`${y}-${m}-${day}`;
 }
 
 draw();
+tanggalDefault();
+
 </script>
 
 </body>
-</html>
+  </html>

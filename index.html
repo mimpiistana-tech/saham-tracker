@@ -650,20 +650,39 @@ document.getElementById("hasil").style.display="none";
   `&to=${tanggalAkhir}`;
 
 
-    const response =
-      await fetch(url);
+const cacheKey =
+  `stockradar_${ticker}_${tanggalAwal}_${tanggalAkhir}`;
 
+let json;
 
-    if(!response.ok){
+const cacheLokal =
+  localStorage.getItem(cacheKey);
 
-      throw new Error(
-        "Server error "+response.status
-      );
-    }
+if(cacheLokal){
 
+  json =
+    JSON.parse(cacheLokal);
 
-    const json =
-      await response.json();
+}else{
+
+  const response =
+    await fetch(url);
+
+  if(!response.ok){
+
+    throw new Error(
+      "Server error "+response.status
+    );
+  }
+
+  json =
+    await response.json();
+
+  localStorage.setItem(
+    cacheKey,
+    JSON.stringify(json)
+  );
+}
 
 
     const data =

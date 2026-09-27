@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
+<meta name="theme-color" content="#07111f">
+<title>StockRadar</title>
+
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#07111f;color:#edf5ff;font-family:Arial,sans-serif}
+.app{max-width:500px;margin:auto;min-height:100vh;padding-bottom:78px}
+header{padding:18px 16px 12px;display:flex;justify-content:space-between}
+.logo{font-size:23px;font-weight:800}
+.muted{color:#8298ae;font-size:12px}
+.card{margin:10px 14px;padding:15px;border:1px solid #1b3853;border-radius:16px;background:#0b1929}
+h2{font-size:17px;margin:0 0 12px}
+.hero{background:linear-gradient(135deg,#10294a,#0d1d32)}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:9px}
+.tile{padding:12px;background:#0d2135;border:1px solid #1a3852;border-radius:12px}
+.tile b{display:block;margin:5px 0}
+.green{color:#18e6a2}
+.yellow{color:#ffd166}
+.red{color:#ff7180}
+.tabs{display:flex;gap:8px;overflow:auto;padding:3px 14px}
+.tab{border:0;border-radius:20px;padding:9px 13px;background:#142a42;color:#c8d7e6}
+.active{background:#18e6a2;color:#001a12;font-weight:700}
+table{width:100%;border-collapse:collapse}
+th,td{text-align:left;padding:10px 5px;border-bottom:1px solid #18334b;font-size:13px}
+th{font-size:11px;color:#8096ad}
+.badge{padding:5px 8px;border-radius:9px;background:#103b31;color:#18e6a2;font-size:11px}
+.score{font-weight:bold;color:#18e6a2}
+input{width:100%;padding:12px;border-radius:11px;border:1px solid #1d3b56;background:#081522;color:white}
+.nav{position:fixed;bottom:0;left:0;right:0;background:#081625;border-top:1px solid #18334c;padding:14px;text-align:center;color:#91a6bb}
+.nav span{margin:0 12px}
+</style>
+</head>
+
+<body>
+<div class="app">
+
+<header>
+<div>
+<div class="logo">📈 StockRadar</div>
+<div class="muted">Radar saham Indonesia</div>
+</div>
+<div>🔔</div>
+</header>
+
+<div class="card hero">
+<h2>🔥 Radar Hari Ini</h2>
+<div class="muted">Prototype — data masih contoh.</div>
+
+<div class="grid" style="margin-top:12px">
+<div class="tile">🏦<b>Broker</b><span class="green">Akumulasi</span></div>
+<div class="tile">📊<b>Volume</b><span class="yellow">Naik</span></div>
+<div class="tile">📰<b>Corporate Action</b><span>3 terdeteksi</span></div>
+<div class="tile">🐋<b>Big Player</b><span class="green">Pantau</span></div>
+</div>
+</div>
+
+<div class="tabs">
+<button class="tab active" onclick="show('radar',this)">Top Radar</button>
+<button class="tab" onclick="show('broker',this)">Broker</button>
+<button class="tab" onclick="show('ca',this)">CA</button>
+</div>
+
+<section id="radar" class="card">
+<h2>Top Radar</h2>
+<input id="search" placeholder="Cari kode saham..." oninput="filter()">
+
+<table>
+<thead>
+<tr>
+<th>Saham</th>
+<th>Harga</th>
+<th>Score</th>
+<th>Sinyal</th>
+</tr>
+</thead>
+<tbody id="rows"></tbody>
+</table>
+</section>
+
+<section id="broker" class="card" style="display:none">
+<h2>🏦 Broker Radar</h2>
+<p><b>CC</b> <span class="green">Net Buy +12,4M</span></p>
+<p><b>XC</b> <span class="green">Net Buy +9,1M</span></p>
+<p><b>YP</b> <span class="yellow">Campuran</span></p>
+<p><b>ZP</b> <span class="red">Net Sell -7,3M</span></p>
+<div class="muted">Nanti bagian ini bisa dibuat otomatis dari data broker BEI.</div>
+</section>
+
+<section id="ca" class="card" style="display:none">
+<h2>📰 Corporate Action Radar</h2>
+<p><b>NAYZ</b> — contoh: akuisisi</p>
+<p><b>PIPA</b> — contoh: RUPS</p>
+<p><b>RANS</b> — contoh: rencana aksi korporasi</p>
+</section>
+
+</div>
+
+<div class="nav">
+<span>⌂ Beranda</span>
+<span>📈 Radar</span>
+<span>🔔 Alert</span>
+</div>
+
+<script>
+const data=[
+['NAYZ','170',82,'Akumulasi'],
+['PIPA','222',76,'Pantau'],
+['RANS','170',71,'Volume'],
+['MEJA','420',69,'Pantau'],
+['BIPI','1020',64,'Pantau']
+];
+
+function draw(list=data){
+document.getElementById('rows').innerHTML=list.map(x=>
+`<tr>
+<td><b>${x[0]}</b></td>
+<td>${x[1]}</td>
+<td class="score">${x[2]}</td>
+<td><span class="badge">${x[3]}</span></td>
+</tr>`
+).join('');
+}
+
+function filter(){
+let q=document.getElementById('search').value.toUpperCase();
+draw(data.filter(x=>x[0].includes(q)));
+}
+
+function show(id,btn){
+['radar','broker','ca'].forEach(x=>
+document.getElementById(x).style.display=x===id?'block':'none'
+);
+document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));
+btn.classList.add('active');
+}
+
+draw();
+</script>
+
+</body>
+</html>

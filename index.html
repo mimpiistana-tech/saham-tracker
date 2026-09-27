@@ -74,7 +74,7 @@ h2{font-size:17px;margin:0 0 12px}
   font-weight:700
 }
 
-input{
+input,select{
   width:100%;
   padding:12px;
   border-radius:11px;
@@ -312,7 +312,16 @@ Masukkan saham yang ingin dibaca.
 <input
   id="tanggal"
   type="date"
->
+  <select id="periode">
+  <option value="1">1 Hari</option>
+  <option value="3">3 Hari</option>
+  <option value="5" selected>5 Hari</option>
+</select>
+><select id="periode">
+  <option value="1">1 Hari</option>
+  <option value="3">3 Hari</option>
+  <option value="5" selected>5 Hari</option>
+</select>
 
 <button class="action" onclick="analisaBroker()">
 🔎 Analisa Broker
@@ -573,7 +582,26 @@ function cariDataBroker(data){
   return [];
 }
 
+function hitungTanggalAwal(tanggalAkhir, jumlahHari){
 
+  const d = new Date(tanggalAkhir + "T00:00:00Z");
+
+  let hitung = 1;
+
+  while(hitung < jumlahHari){
+
+    d.setUTCDate(d.getUTCDate() - 1);
+
+    const hari = d.getUTCDay();
+
+    // Lewati Sabtu dan Minggu
+    if(hari !== 0 && hari !== 6){
+      hitung++;
+    }
+  }
+
+  return d.toISOString().slice(0,10);
+        }
 async function analisaBroker(){
 
   const ticker=
@@ -583,38 +611,47 @@ async function analisaBroker(){
       .trim()
       .toUpperCase();
 
-  const tanggal=
+  const tanggalAkhir =
+  document
+    .getElementById("tanggal")
+    .value;
+
+const periode =
+  Number(
     document
-      .getElementById("tanggal")
-      .value;
+      .getElementById("periode")
+      .value
+  );
 
-  if(!ticker){
+if(!ticker){
 
-    alert("Isi kode saham dulu bro.");
+  alert("Isi kode saham dulu bro.");
 
-    return;
-  }
+  return;
+}
 
-  if(!tanggal){
+if(!tanggalAkhir){
 
-    alert("Pilih tanggal dulu bro.");
+  alert("Pilih tanggal dulu bro.");
 
-    return;
-  }
+  return;
+}
 
+const tanggalAwal =
+  hitungTanggalAwal(tanggalAkhir, periode);
 
-  document.getElementById("loading").style.display="block";
+document.getElementById("loading").style.display="block";
 
-  document.getElementById("hasil").style.display="none";
+document.getElementById("hasil").style.display="none";
 
 
   try{
 
     const url =
-      `${API_BASE}/api/broker`+
-      `?ticker=${encodeURIComponent(ticker)}`+
-      `&from=${tanggal}`+
-      `&to=${tanggal}`;
+  `${API_BASE}/api/broker`+
+  `?ticker=${encodeURIComponent(ticker)}`+
+  `&from=${tanggalAwal}`+
+  `&to=${tanggalAkhir}`;
 
 
     const response =
@@ -762,8 +799,8 @@ async function analisaBroker(){
 
 
     document.getElementById("signal")
-      .textContent =
-        `${ticker} — ${signal}`;
+  .textContent =
+    `${ticker} — ${periode} Hari — ${signal}`;
 
 
     document.getElementById("signal")

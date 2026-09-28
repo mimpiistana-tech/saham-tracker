@@ -380,9 +380,9 @@ td{
     </div>
 
     <div class="tile">
-      <div class="tile-title">💰 NET FLOW</div>
-      <div id="netFlow" class="tile-value green">--</div>
-      <div class="small">Akumulasi - distribusi</div>
+      <div class="tile-title">📊 BROKER PRESSURE</div>
+<div id="netFlow" class="tile-value green">--</div>
+<div class="small">Tekanan akumulasi / distribusi</div>
     </div>
 
     <div class="tile">
@@ -847,8 +847,28 @@ function renderRadar(raw){
   coverage.toFixed(1)+'%';
 
 
-  const totalNet =
-  Number(metrics.total_net || 0);
+  const brokerPressure =
+Number(metrics.imbalance || 0);
+
+const netEl =
+document.getElementById('netFlow');
+
+netEl.textContent =
+(brokerPressure > 0 ? '+' : '') +
+(brokerPressure * 100).toFixed(1) +
+'%';
+
+let pressureColor = 'yellow';
+
+if(brokerPressure > 0.05){
+  pressureColor = 'green';
+}
+else if(brokerPressure < -0.05){
+  pressureColor = 'red';
+}
+
+netEl.className =
+'tile-value ' + pressureColor;
 
   const netEl =
   document

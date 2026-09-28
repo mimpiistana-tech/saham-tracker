@@ -4,175 +4,281 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
 <meta name="theme-color" content="#07111f">
-<link rel="manifest" href="manifest.json">
-<title>StockRadar</title>
+
+<title>StockRadar Genius</title>
 
 <style>
-*{box-sizing:border-box}
+*{
+  box-sizing:border-box;
+}
+
 body{
   margin:0;
-  background:#07111f;
-  color:#edf5ff;
-  font-family:Arial,sans-serif
+  background:#06101d;
+  color:#edf6ff;
+  font-family:Arial,sans-serif;
 }
+
 .app{
   max-width:520px;
   margin:auto;
   min-height:100vh;
-  padding-bottom:85px
+  padding-bottom:90px;
 }
+
 header{
-  padding:18px 16px 12px;
+  padding:18px 16px 8px;
   display:flex;
-  justify-content:space-between
+  justify-content:space-between;
+  align-items:center;
 }
-.logo{font-size:23px;font-weight:800}
-.muted{color:#8298ae;font-size:12px}
+
+.logo{
+  font-size:23px;
+  font-weight:800;
+}
+
+.logo span{
+  color:#19e6a2;
+}
+
+.muted{
+  color:#8298ae;
+  font-size:12px;
+}
+
+.online{
+  font-size:11px;
+  background:#103c31;
+  color:#19e6a2;
+  padding:6px 9px;
+  border-radius:20px;
+}
+
 .card{
-  margin:10px 14px;
+  margin:11px 14px;
   padding:15px;
-  border:1px solid #1b3853;
-  border-radius:16px;
-  background:#0b1929
+  border:1px solid #183651;
+  border-radius:18px;
+  background:#0a1929;
 }
-h2{font-size:17px;margin:0 0 12px}
-.hero{background:linear-gradient(135deg,#10294a,#0d1d32)}
+
+.hero{
+  background:
+  linear-gradient(135deg,#12345b,#0a1b30);
+}
+
+.hero-title{
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+}
+
+h2{
+  font-size:17px;
+  margin:0 0 10px;
+}
+
+.big-score{
+  font-size:50px;
+  font-weight:900;
+  color:#19e6a2;
+  line-height:1;
+}
+
+.score-text{
+  font-size:13px;
+  margin-top:6px;
+  color:#cbd8e5;
+}
+
+.progress{
+  width:100%;
+  height:9px;
+  border-radius:10px;
+  background:#102942;
+  margin-top:14px;
+  overflow:hidden;
+}
+
+.progress-bar{
+  height:100%;
+  width:0%;
+  background:#19e6a2;
+  border-radius:10px;
+  transition:.4s;
+}
 
 .grid{
   display:grid;
   grid-template-columns:1fr 1fr;
-  gap:9px
+  gap:10px;
+  margin-top:13px;
 }
-.tile{
-  padding:12px;
-  background:#0d2135;
-  border:1px solid #1a3852;
-  border-radius:12px
-}
-.tile b{display:block;margin:5px 0}
 
-.green{color:#18e6a2}
-.yellow{color:#ffd166}
-.red{color:#ff7180}
+.tile{
+  padding:13px;
+  background:#0d2236;
+  border:1px solid #193c59;
+  border-radius:14px;
+}
+
+.tile-title{
+  color:#879db3;
+  font-size:11px;
+  margin-bottom:7px;
+}
+
+.tile-value{
+  font-size:20px;
+  font-weight:800;
+}
+
+.green{
+  color:#19e6a2;
+}
+
+.yellow{
+  color:#ffd166;
+}
+
+.red{
+  color:#ff7180;
+}
+
+.blue{
+  color:#65b7ff;
+}
 
 .tabs{
   display:flex;
   gap:8px;
   overflow:auto;
-  padding:3px 14px
+  padding:4px 14px;
 }
+
 .tab{
+  flex:none;
   border:0;
-  border-radius:20px;
+  border-radius:22px;
   padding:10px 14px;
-  background:#142a42;
-  color:#c8d7e6
+  background:#122b43;
+  color:#c9d8e7;
 }
+
 .tab.active{
-  background:#18e6a2;
-  color:#001a12;
-  font-weight:700
-}
-
-input,select{
-  width:100%;
-  padding:12px;
-  border-radius:11px;
-  border:1px solid #1d3b56;
-  background:#081522;
-  color:white;
-  margin-bottom:9px
-}
-
-button.action{
-  width:100%;
-  padding:13px;
-  border:0;
-  border-radius:11px;
+  background:#19e6a2;
+  color:#001b13;
   font-weight:800;
-  background:#18e6a2;
-  color:#00271b;
-  font-size:14px
+}
+
+.section{
+  display:none;
+}
+
+.section.active-section{
+  display:block;
+}
+
+.row{
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  border-bottom:1px solid #17344d;
+  padding:11px 0;
+}
+
+.row:last-child{
+  border-bottom:0;
+}
+
+.broker-name{
+  font-size:16px;
+  font-weight:800;
+}
+
+.small{
+  font-size:11px;
+  color:#8298ae;
+}
+
+.badge{
+  display:inline-block;
+  padding:5px 8px;
+  border-radius:10px;
+  background:#103b31;
+  color:#19e6a2;
+  font-size:11px;
+  font-weight:700;
+}
+
+.badge-red{
+  background:#401d25;
+  color:#ff7180;
+}
+
+.note{
+  padding:11px;
+  border-radius:12px;
+  background:#0d2236;
+  margin-top:8px;
+  color:#c5d5e3;
+  font-size:12px;
+  line-height:1.5;
+}
+
+.status-box{
+  padding:10px 12px;
+  border-radius:12px;
+  background:#0e2134;
+  margin-top:10px;
+}
+
+.status-title{
+  font-size:11px;
+  color:#8298ae;
+}
+
+.status-value{
+  font-size:14px;
+  margin-top:4px;
+  font-weight:700;
+}
+
+button.refresh{
+  width:100%;
+  border:0;
+  margin-top:12px;
+  padding:12px;
+  border-radius:13px;
+  background:#19e6a2;
+  color:#002016;
+  font-weight:900;
+  font-size:14px;
 }
 
 table{
   width:100%;
-  border-collapse:collapse
+  border-collapse:collapse;
 }
-th,td{
-  text-align:left;
-  padding:10px 5px;
-  border-bottom:1px solid #18334b;
-  font-size:12px
-}
+
 th{
-  color:#8096ad;
-  font-size:10px
+  color:#7f96ad;
+  font-size:11px;
+  text-align:left;
+  padding:8px 4px;
 }
 
-.badge{
-  padding:5px 8px;
-  border-radius:9px;
-  background:#103b31;
-  color:#18e6a2;
-  font-size:11px
-}
-.score{
-  font-weight:bold;
-  color:#18e6a2
-}
-
-.resultBox{
-  margin-top:12px;
-  padding:13px;
-  border-radius:13px;
-  background:#081522;
-  border:1px solid #1c3953
-}
-.bigSignal{
-  font-size:19px;
-  font-weight:800;
-  margin:5px 0
-}
-
-.two{
-  display:grid;
-  grid-template-columns:1fr 1fr;
-  gap:8px;
-  margin-top:10px
-}
-.stat{
-  background:#0d2135;
-  border-radius:11px;
-  padding:10px
-}
-.stat span{
-  display:block;
-  color:#8298ae;
-  font-size:10px
-}
-.stat b{
-  display:block;
-  margin-top:5px;
-  font-size:13px
-}
-
-.listRow{
-  display:flex;
-  justify-content:space-between;
-  padding:9px 2px;
-  border-bottom:1px solid #173149;
-  font-size:12px
-}
-
-.scroll{
-  overflow-x:auto
+td{
+  font-size:13px;
+  padding:11px 4px;
+  border-top:1px solid #17344d;
 }
 
 .loading{
   text-align:center;
-  padding:18px;
-  color:#ffd166
+  padding:20px;
+  color:#8298ae;
 }
 
 .nav{
@@ -180,13 +286,40 @@ th{
   bottom:0;
   left:0;
   right:0;
-  background:#081625;
-  border-top:1px solid #18334c;
-  padding:14px;
-  text-align:center;
-  color:#91a6bb
+  background:#071522;
+  border-top:1px solid #183750;
+  padding:12px 4px;
+  display:flex;
+  justify-content:center;
 }
-.nav span{margin:0 12px}
+
+.nav-inner{
+  width:100%;
+  max-width:520px;
+  display:flex;
+  justify-content:space-around;
+}
+
+.nav-item{
+  text-align:center;
+  color:#8298ae;
+  font-size:11px;
+}
+
+.nav-item.active{
+  color:#19e6a2;
+  font-weight:800;
+}
+
+.nav-icon{
+  display:block;
+  font-size:19px;
+  margin-bottom:3px;
+}
+
+.error{
+  color:#ff8b96;
+}
 </style>
 </head>
 
@@ -196,205 +329,171 @@ th{
 
 <header>
   <div>
-    <div class="logo">📈 StockRadar</div>
-    <div class="muted">Radar Saham Indonesia</div>
+    <div class="logo">📈 Stock<span>Radar</span></div>
+    <div class="muted">Genius Engine V1</div>
   </div>
-  <div>🔔</div>
+
+  <div id="apiStatus" class="online">
+    ● Connecting
+  </div>
 </header>
 
+
 <div class="card hero">
-  <h2>🔥 Radar Hari Ini</h2>
-  <div class="muted">Data broker asli + analisa otomatis StockRadar</div>
 
-  <div class="grid" style="margin-top:12px">
+  <div class="hero-title">
+
+    <div>
+      <div class="muted">RADAR SCORE</div>
+
+      <div id="radarScore" class="big-score">
+        --
+      </div>
+
+      <div id="radarLabel" class="score-text">
+        Memuat mesin Radar Genius...
+      </div>
+    </div>
+
+    <div style="font-size:45px">
+      🧠
+    </div>
+
+  </div>
+
+  <div class="progress">
+    <div id="scoreBar" class="progress-bar"></div>
+  </div>
+
+  <div class="grid">
+
     <div class="tile">
-      🏦
-      <b>Broker</b>
-      <span class="green">LIVE</span>
+      <div class="tile-title">🏦 BROKER SCORE</div>
+      <div id="brokerScore" class="tile-value green">--</div>
+      <div id="brokerLabel" class="small">Menunggu data</div>
     </div>
 
     <div class="tile">
-      📊
-      <b>Volume</b>
-      <span class="yellow">Segera</span>
+      <div class="tile-title">📡 DATA COVERAGE</div>
+      <div id="coverage" class="tile-value blue">--%</div>
+      <div class="small">Data yang sudah aktif</div>
     </div>
 
     <div class="tile">
-      📰
-      <b>Corporate Action</b>
-      <span>Pantau</span>
+      <div class="tile-title">💰 NET FLOW</div>
+      <div id="netFlow" class="tile-value green">--</div>
+      <div class="small">Akumulasi - distribusi</div>
     </div>
 
     <div class="tile">
-      🐋
-      <b>Big Player</b>
-      <span class="green">Analisa</span>
+      <div class="tile-title">👥 BROKER AKTIF</div>
+      <div id="activeBrokers" class="tile-value yellow">--</div>
+      <div class="small">Buyer + seller</div>
     </div>
+
+  </div>
+
+  <button class="refresh" onclick="loadRadar()">
+    🔄 Refresh Radar
+  </button>
+
+</div>
+
+
+<div class="tabs">
+
+  <button class="tab active"
+    onclick="openTab('overview',this)">
+    🧠 Genius
+  </button>
+
+  <button class="tab"
+    onclick="openTab('buyers',this)">
+    🟢 Buyer
+  </button>
+
+  <button class="tab"
+    onclick="openTab('sellers',this)">
+    🔴 Seller
+  </button>
+
+  <button class="tab"
+    onclick="openTab('engine',this)">
+    ⚙️ Engine
+  </button>
+
+</div>
+
+
+<section id="overview"
+class="section active-section">
+
+<div class="card">
+
+<h2>🧠 Radar Genius</h2>
+
+<div class="status-box">
+  <div class="status-title">Kesimpulan Mesin</div>
+  <div id="geniusConclusion"
+       class="status-value">
+       Menunggu data...
   </div>
 </div>
 
-<div class="tabs">
-  <button class="tab active" onclick="showTab('radar',this)">
-    Top Radar
-  </button>
+<div class="status-box">
+  <div class="status-title">
+    Dominasi Broker
+  </div>
+  <div id="imbalance"
+       class="status-value">
+       --
+  </div>
+</div>
 
-  <button class="tab" onclick="showTab('broker',this)">
-    Broker Pintar
-  </button>
+<div class="status-box">
+  <div class="status-title">
+    Breadth
+  </div>
+  <div id="breadth"
+       class="status-value">
+       --
+  </div>
+</div>
 
-  <button class="tab" onclick="showTab('ca',this)">
-    CA
-  </button>
+<div class="status-box">
+  <div class="status-title">
+    Konsentrasi Top Buyer
+  </div>
+  <div id="topBuyerShare"
+       class="status-value">
+       --
+  </div>
+</div>
+
 </div>
 
 
-<section id="radar" class="card">
+<div class="card">
 
-<h2>⭐ Top Radar</h2>
+<h2>📋 Catatan Mesin</h2>
 
-<div class="muted" style="margin-bottom:10px">
-Versi awal. Broker Radar sudah menggunakan data API asli.
+<div id="notes">
+  <div class="loading">
+    Memuat analisa...
+  </div>
 </div>
 
-<table>
-<thead>
-<tr>
-<th>Saham</th>
-<th>Harga</th>
-<th>Score</th>
-<th>Sinyal</th>
-</tr>
-</thead>
-
-<tbody>
-<tr>
-<td><b>NAYZ</b></td>
-<td>170</td>
-<td class="score">82</td>
-<td><span class="badge">Pantau</span></td>
-</tr>
-
-<tr>
-<td><b>PIPA</b></td>
-<td>222</td>
-<td class="score">76</td>
-<td><span class="badge">Pantau</span></td>
-</tr>
-
-<tr>
-<td><b>RANS</b></td>
-<td>170</td>
-<td class="score">71</td>
-<td><span class="badge">Pantau</span></td>
-</tr>
-</tbody>
-</table>
+</div>
 
 </section>
 
 
-<section id="broker" class="card" style="display:none">
+<section id="buyers"
+class="section">
 
-<h2>🧠 Broker Radar Pintar</h2>
+<div class="card">
 
-<div class="muted" style="margin-bottom:12px">
-Masukkan saham yang ingin dibaca.
-</div>
-
-<input
-  id="ticker"
-  maxlength="6"
-  placeholder="Kode saham, contoh: BBRI"
-  value="BBRI"
-  oninput="this.value=this.value.toUpperCase()"
->
-<input
-  id="tanggal"
-  type="date"
->
-
-<select id="periode">
-  <option value="1">1 Hari</option>
-  <option value="3">3 Hari</option>
-  <option value="5" selected>5 Hari</option>
-</select>
-
-<button class="action" onclick="analisaBroker()">
-🔎 Analisa Broker
-</button>
-
-
-<div id="loading" class="loading" style="display:none">
-⏳ Mengambil data broker...
-<br>
-<span class="muted">Render gratis kadang butuh beberapa detik.</span>
-</div>
-
-
-<div id="hasil" style="display:none">
-
-<div class="resultBox">
-
-<div class="muted">HASIL ANALISA</div>
-
-<div id="signal" class="bigSignal">
--
-</div>
-
-<div id="kesimpulan" class="muted">
--
-</div>
-
-<div class="two">
-
-<div class="stat">
-<span>Top Akumulator</span>
-<b id="topBuyer">-</b>
-</div>
-
-<div class="stat">
-<span>Top Distributor</span>
-<b id="topSeller">-</b>
-</div>
-
-<div class="stat">
-<span>Power Top Buy</span>
-<b id="buyPower" class="green">-</b>
-</div>
-
-<div class="stat">
-<span>Power Top Sell</span>
-<b id="sellPower" class="red">-</b>
-</div>
-
-</div>
-
-</div>
-
-
-<div class="resultBox">
-
-<h2>🟢 Top 5 Net Buy</h2>
-
-<div id="buyers"></div>
-
-</div>
-
-
-<div class="resultBox">
-
-<h2>🔴 Top 5 Net Sell</h2>
-
-<div id="sellers"></div>
-
-</div>
-
-
-<div class="resultBox">
-
-<h2>📋 Semua Broker</h2>
-
-<div class="scroll">
+<h2>🟢 Top Broker Buyer</h2>
 
 <table>
 
@@ -407,29 +506,131 @@ Masukkan saham yang ingin dibaca.
 </tr>
 </thead>
 
-<tbody id="brokerRows"></tbody>
+<tbody id="buyerRows">
+
+<tr>
+<td colspan="4" class="loading">
+Memuat...
+</td>
+</tr>
+
+</tbody>
 
 </table>
-
-</div>
-
-</div>
 
 </div>
 
 </section>
 
 
-<section id="ca" class="card" style="display:none">
+<section id="sellers"
+class="section">
 
-<h2>📰 Corporate Action Radar</h2>
+<div class="card">
 
-<p><b>NAYZ</b> — Akuisisi / aksi korporasi</p>
-<p><b>PIPA</b> — RUPS</p>
-<p><b>RANS</b> — Pantau aksi korporasi</p>
+<h2>🔴 Top Broker Seller</h2>
 
-<div class="muted">
-Nanti bagian ini kita sambungkan ke data corporate action asli.
+<table>
+
+<thead>
+<tr>
+<th>Broker</th>
+<th>Buy</th>
+<th>Sell</th>
+<th>Net</th>
+</tr>
+</thead>
+
+<tbody id="sellerRows">
+
+<tr>
+<td colspan="4" class="loading">
+Memuat...
+</td>
+</tr>
+
+</tbody>
+
+</table>
+
+</div>
+
+</section>
+
+
+<section id="engine"
+class="section">
+
+<div class="card">
+
+<h2>⚙️ Radar Engine</h2>
+
+<div class="row">
+  <div>
+    <div class="broker-name">
+      🏦 Broker Flow
+    </div>
+    <div class="small">
+      Bobot mesin
+    </div>
+  </div>
+  <b class="green">35%</b>
+</div>
+
+<div class="row">
+  <div>
+    <div class="broker-name">
+      📈 Trend
+    </div>
+    <div class="small">
+      Tahap berikutnya
+    </div>
+  </div>
+  <b>20%</b>
+</div>
+
+<div class="row">
+  <div>
+    <div class="broker-name">
+      📊 Volume
+    </div>
+    <div class="small">
+      Tahap berikutnya
+    </div>
+  </div>
+  <b>20%</b>
+</div>
+
+<div class="row">
+  <div>
+    <div class="broker-name">
+      📰 Catalyst
+    </div>
+    <div class="small">
+      Corporate action & berita
+    </div>
+  </div>
+  <b>15%</b>
+</div>
+
+<div class="row">
+  <div>
+    <div class="broker-name">
+      🛡️ Risk
+    </div>
+    <div class="small">
+      Filter risiko
+    </div>
+  </div>
+  <b>10%</b>
+</div>
+
+<div class="note">
+Radar Score tidak memaksa komponen yang
+belum punya data real. Coverage menunjukkan
+berapa persen mesin yang sudah aktif.
+</div>
+
 </div>
 
 </section>
@@ -438,517 +639,389 @@ Nanti bagian ini kita sambungkan ke data corporate action asli.
 
 
 <div class="nav">
-<span>⌂ Beranda</span>
-<span>📈 Radar</span>
-<span>🔔 Alert</span>
+
+<div class="nav-inner">
+
+<div class="nav-item active">
+<span class="nav-icon">🧠</span>
+Genius
+</div>
+
+<div class="nav-item">
+<span class="nav-icon">📈</span>
+Radar
+</div>
+
+<div class="nav-item">
+<span class="nav-icon">🔔</span>
+Alert
+</div>
+
+<div class="nav-item">
+<span class="nav-icon">⭐</span>
+Watchlist
+</div>
+
+</div>
+
 </div>
 
 
 <script>
 
-const API_BASE = "https://saham-tracker-api.onrender.com";
+function openTab(id,btn){
 
-
-function showTab(id,btn){
-
-  ["radar","broker","ca"].forEach(x=>{
-    document.getElementById(x).style.display =
-      x === id ? "block" : "none";
-  });
-
-  document.querySelectorAll(".tab").forEach(x=>{
-    x.classList.remove("active");
-  });
-
-  btn.classList.add("active");
-}
-
-
-function jakartaDate(){
-
-  const parts =
-    new Intl.DateTimeFormat(
-      "en-US",
-      {
-        timeZone:"Asia/Jakarta",
-        year:"numeric",
-        month:"2-digit",
-        day:"2-digit"
-      }
-    ).formatToParts(new Date());
-
-  const obj={};
-
-  parts.forEach(p=>{
-    obj[p.type]=p.value;
-  });
-
-  let d =
-    new Date(
-      `${obj.year}-${obj.month}-${obj.day}T05:00:00Z`
-    );
-
-  while(
-    d.getUTCDay()===0 ||
-    d.getUTCDay()===6
-  ){
-    d.setUTCDate(d.getUTCDate()-1);
-  }
-
-  return d.toISOString().slice(0,10);
-}
-
-
-document.getElementById("tanggal").value =
-  jakartaDate();
-
-
-function number(v){
-
-  const n = Number(v);
-
-  return Number.isFinite(n) ? n : 0;
-}
-
-
-function rupiah(v){
-
-  const n=Math.abs(v);
-
-  let hasil;
-
-  if(n>=1e12)
-    hasil=(n/1e12).toFixed(2)+" T";
-
-  else if(n>=1e9)
-    hasil=(n/1e9).toFixed(2)+" M";
-
-  else if(n>=1e6)
-    hasil=(n/1e6).toFixed(2)+" jt";
-
-  else if(n>=1e3)
-    hasil=(n/1e3).toFixed(1)+" rb";
-
-  else
-    hasil=n.toFixed(0);
-
-  return (v<0?"-":"")+"Rp "+hasil;
-}
-
-
-function cariDataBroker(data){
-
-  if(Array.isArray(data)){
-
-    if(
-      data.length &&
-      typeof data[0] === "object" &&
-      (
-        "buy_value" in data[0] ||
-        "sell_value" in data[0]
-      )
-    ){
-      return data;
-    }
-
-    for(const item of data){
-
-      const ketemu=cariDataBroker(item);
-
-      if(ketemu.length)
-        return ketemu;
-    }
-  }
-
-  else if(
-    data &&
-    typeof data === "object"
-  ){
-
-    for(const key of Object.keys(data)){
-
-      const ketemu =
-        cariDataBroker(data[key]);
-
-      if(ketemu.length)
-        return ketemu;
-    }
-  }
-
-  return [];
-}
-
-function hitungTanggalAwal(tanggalAkhir, jumlahHari){
-
-  const d = new Date(tanggalAkhir + "T00:00:00Z");
-
-  let hitung = 1;
-
-  while(hitung < jumlahHari){
-
-    d.setUTCDate(d.getUTCDate() - 1);
-
-    const hari = d.getUTCDay();
-
-    // Lewati Sabtu dan Minggu
-    if(hari !== 0 && hari !== 6){
-      hitung++;
-    }
-  }
-
-  return d.toISOString().slice(0,10);
-        }
-async function analisaBroker(){
-
-  const ticker=
-    document
-      .getElementById("ticker")
-      .value
-      .trim()
-      .toUpperCase();
-
-  const tanggalAkhir =
   document
-    .getElementById("tanggal")
-    .value;
+  .querySelectorAll('.section')
+  .forEach(x=>{
+    x.classList.remove('active-section');
+  });
 
-const periode =
-  Number(
-    document
-      .getElementById("periode")
-      .value
+  document
+  .getElementById(id)
+  .classList.add('active-section');
+
+  document
+  .querySelectorAll('.tab')
+  .forEach(x=>{
+    x.classList.remove('active');
+  });
+
+  btn.classList.add('active');
+}
+
+
+function compactNumber(value){
+
+  let n = Number(value || 0);
+
+  let abs = Math.abs(n);
+
+  if(abs >= 1000000000000)
+    return (n/1000000000000)
+    .toFixed(2)+'T';
+
+  if(abs >= 1000000000)
+    return (n/1000000000)
+    .toFixed(2)+'B';
+
+  if(abs >= 1000000)
+    return (n/1000000)
+    .toFixed(2)+'M';
+
+  if(abs >= 1000)
+    return (n/1000)
+    .toFixed(2)+'K';
+
+  return n.toFixed(0);
+}
+
+
+function percent(value){
+
+  let n = Number(value || 0);
+
+  return (n * 100).toFixed(1) + '%';
+}
+
+
+function renderBrokerTable(rows,id){
+
+  const target =
+  document.getElementById(id);
+
+  if(!rows || !rows.length){
+
+    target.innerHTML =
+    `<tr>
+      <td colspan="4"
+      class="muted">
+      Belum ada data
+      </td>
+    </tr>`;
+
+    return;
+  }
+
+  target.innerHTML =
+  rows.map(x=>{
+
+    let net =
+    Number(x.net || 0);
+
+    let color =
+    net >= 0
+    ? 'green'
+    : 'red';
+
+    return `
+    <tr>
+
+      <td>
+        <b>${x.broker || '?'}</b>
+      </td>
+
+      <td>
+        ${compactNumber(x.buy)}
+      </td>
+
+      <td>
+        ${compactNumber(x.sell)}
+      </td>
+
+      <td class="${color}">
+        ${net >= 0 ? '+' : ''}
+        ${compactNumber(net)}
+      </td>
+
+    </tr>
+    `;
+
+  }).join('');
+}
+
+
+function renderRadar(raw){
+
+  const data =
+  raw.data || raw;
+
+  const radar =
+  data.radar || {};
+
+  const broker =
+  data.broker || {};
+
+  const metrics =
+  broker.metrics || {};
+
+
+  const radarScore =
+  Number(radar.radar_score ?? 0);
+
+  const coverage =
+  Number(radar.coverage ?? 0);
+
+  const brokerScore =
+  Number(broker.score ?? 0);
+
+
+  document
+  .getElementById('radarScore')
+  .textContent =
+  radarScore.toFixed(1);
+
+
+  document
+  .getElementById('radarLabel')
+  .textContent =
+  radar.label ||
+  'Belum ada label';
+
+
+  document
+  .getElementById('scoreBar')
+  .style.width =
+  Math.max(
+    0,
+    Math.min(100,radarScore)
+  )+'%';
+
+
+  document
+  .getElementById('brokerScore')
+  .textContent =
+  brokerScore.toFixed(1);
+
+
+  document
+  .getElementById('brokerLabel')
+  .textContent =
+  broker.label ||
+  'Belum ada data';
+
+
+  document
+  .getElementById('coverage')
+  .textContent =
+  coverage.toFixed(1)+'%';
+
+
+  const totalNet =
+  Number(metrics.total_net || 0);
+
+  const netEl =
+  document
+  .getElementById('netFlow');
+
+  netEl.textContent =
+  (totalNet >= 0 ? '+' : '') +
+  compactNumber(totalNet);
+
+  netEl.className =
+  'tile-value ' +
+  (totalNet >= 0
+   ? 'green'
+   : 'red');
+
+
+  document
+  .getElementById('activeBrokers')
+  .textContent =
+  metrics.active_brokers ?? '--';
+
+
+  document
+  .getElementById('geniusConclusion')
+  .textContent =
+  radar.label ||
+  broker.label ||
+  'Belum ada kesimpulan';
+
+
+  document
+  .getElementById('imbalance')
+  .textContent =
+  percent(metrics.imbalance);
+
+
+  document
+  .getElementById('breadth')
+  .textContent =
+  percent(metrics.breadth);
+
+
+  document
+  .getElementById('topBuyerShare')
+  .textContent =
+  percent(metrics.top_buyer_share);
+
+
+  const notes =
+  broker.notes || [];
+
+  document
+  .getElementById('notes')
+  .innerHTML =
+  notes.length
+  ? notes.map(n=>
+      `<div class="note">
+       ${n}
+       </div>`
+    ).join('')
+  : `<div class="note">
+     Belum ada catatan tambahan.
+     </div>`;
+
+
+  renderBrokerTable(
+    broker.top_buyers,
+    'buyerRows'
   );
 
-if(!ticker){
 
-  alert("Isi kode saham dulu bro.");
+  renderBrokerTable(
+    broker.top_sellers,
+    'sellerRows'
+  );
 
-  return;
+
+  const status =
+  document
+  .getElementById('apiStatus');
+
+  status.textContent =
+  '● Engine Online';
+
+  status.className =
+  'online';
 }
 
-if(!tanggalAkhir){
 
-  alert("Pilih tanggal dulu bro.");
+function showError(message){
 
-  return;
+  const status =
+  document
+  .getElementById('apiStatus');
+
+  status.textContent =
+  '● API Error';
+
+  status.className =
+  'online error';
+
+
+  document
+  .getElementById('radarLabel')
+  .textContent =
+  message;
 }
 
-const tanggalAwal =
-  hitungTanggalAwal(tanggalAkhir, periode);
 
-document.getElementById("loading").style.display="block";
+async function loadRadar(){
 
-document.getElementById("hasil").style.display="none";
+  const status =
+  document
+  .getElementById('apiStatus');
+
+  status.textContent =
+  '● Loading';
 
 
   try{
 
-    const url =
-  `${API_BASE}/api/broker`+
-  `?ticker=${encodeURIComponent(ticker)}`+
-  `&from=${tanggalAwal}`+
-  `&to=${tanggalAkhir}`;
-
-
-const cacheKey =
-  `stockradar_${ticker}_${tanggalAwal}_${tanggalAkhir}`;
-
-let json;
-
-const cacheLokal =
-  localStorage.getItem(cacheKey);
-
-if(cacheLokal){
-
-  json =
-    JSON.parse(cacheLokal);
-
-}else{
-
-  const response =
-    await fetch(url);
-
-  if(!response.ok){
-
-    throw new Error(
-      "Server error "+response.status
+    let response =
+    await fetch(
+      '/api/radar',
+      {
+        cache:'no-store'
+      }
     );
-  }
 
-  json =
-    await response.json();
 
-  localStorage.setItem(
-    cacheKey,
-    JSON.stringify(json)
-  );
-}
+    if(!response.ok){
+
+      response =
+      await fetch(
+        '/api/radar-test',
+        {
+          cache:'no-store'
+        }
+      );
+
+    }
+
+
+    if(!response.ok){
+
+      throw new Error(
+        'API belum merespons'
+      );
+
+    }
 
 
     const data =
-      cariDataBroker(json);
+    await response.json();
 
 
-    if(!data.length){
+    renderRadar(data);
 
-      throw new Error(
-        "Data broker kosong. Coba tanggal perdagangan lain."
-      );
-    }
 
+  }catch(error){
 
-    const brokers =
-      data.map(x=>{
+    console.error(error);
 
-        const buy=
-          number(x.buy_value);
-
-        const sell=
-          number(x.sell_value);
-
-        return {
-
-          code:
-            x.code ||
-            x.broker ||
-            "-",
-
-          buy:buy,
-
-          sell:sell,
-
-          net:buy-sell,
-
-          buyAvg:
-            number(x.buy_avg),
-
-          sellAvg:
-            number(x.sell_avg)
-
-        };
-
-      });
-
-
-    const buyers =
-      brokers
-        .filter(x=>x.net>0)
-        .sort((a,b)=>b.net-a.net);
-
-
-    const sellers =
-      brokers
-        .filter(x=>x.net<0)
-        .sort((a,b)=>a.net-b.net);
-
-
-    const topBuy =
-      buyers.slice(0,5);
-
-
-    const topSell =
-      sellers.slice(0,5);
-
-
-    const buyPower =
-      topBuy.reduce(
-        (a,b)=>a+b.net,0
-      );
-
-
-    const sellPower =
-      topSell.reduce(
-        (a,b)=>a+Math.abs(b.net),0
-      );
-
-
-    let ratio =
-      sellPower
-        ? buyPower/sellPower
-        : 99;
-
-
-    let signal;
-    let warna;
-    let kesimpulan;
-
-
-    if(ratio>=1.15){
-
-      signal =
-        "🟢 Indikasi Akumulasi";
-
-      warna =
-        "#18e6a2";
-
-      kesimpulan =
-        "Net buy broker teratas lebih dominan dibanding net sell broker teratas.";
-
-    }
-
-    else if(ratio<=0.87){
-
-      signal =
-        "🔴 Indikasi Distribusi";
-
-      warna =
-        "#ff7180";
-
-      kesimpulan =
-        "Net sell broker teratas lebih dominan dibanding net buy broker teratas.";
-
-    }
-
-    else{
-
-      signal =
-        "🟡 Relatif Seimbang";
-
-      warna =
-        "#ffd166";
-
-      kesimpulan =
-        "Kekuatan broker pembeli dan penjual teratas masih relatif berimbang.";
-
-    }
-
-
-    document.getElementById("signal")
-  .textContent =
-    `${ticker} — ${periode} Hari — ${signal}`;
-
-
-    document.getElementById("signal")
-      .style.color =
-        warna;
-
-
-    document.getElementById("kesimpulan")
-      .textContent =
-        kesimpulan;
-
-
-    document.getElementById("topBuyer")
-      .textContent =
-        buyers[0]
-          ? buyers[0].code+
-            " "+rupiah(buyers[0].net)
-          : "-";
-
-
-    document.getElementById("topSeller")
-      .textContent =
-        sellers[0]
-          ? sellers[0].code+
-            " "+rupiah(sellers[0].net)
-          : "-";
-
-
-    document.getElementById("buyPower")
-      .textContent =
-        rupiah(buyPower);
-
-
-    document.getElementById("sellPower")
-      .textContent =
-        rupiah(-sellPower);
-
-
-    document.getElementById("buyers")
-      .innerHTML =
-        topBuy.map((x,i)=>`
-
-          <div class="listRow">
-
-            <span>
-              ${i+1}. <b>${x.code}</b>
-            </span>
-
-            <span class="green">
-              +${rupiah(x.net)}
-            </span>
-
-          </div>
-
-        `).join("");
-
-
-    document.getElementById("sellers")
-      .innerHTML =
-        topSell.map((x,i)=>`
-
-          <div class="listRow">
-
-            <span>
-              ${i+1}. <b>${x.code}</b>
-            </span>
-
-            <span class="red">
-              ${rupiah(x.net)}
-            </span>
-
-          </div>
-
-        `).join("");
-
-
-    document.getElementById("brokerRows")
-      .innerHTML =
-        brokers
-          .sort(
-            (a,b)=>
-              Math.abs(b.net)-
-              Math.abs(a.net)
-          )
-          .map(x=>`
-
-            <tr>
-
-              <td>
-                <b>${x.code}</b>
-              </td>
-
-              <td>
-                ${rupiah(x.buy)}
-              </td>
-
-              <td>
-                ${rupiah(x.sell)}
-              </td>
-
-              <td class="${x.net>=0?'green':'red'}">
-                ${x.net>=0?'+':''}${rupiah(x.net)}
-              </td>
-
-            </tr>
-
-          `).join("");
-
-
-    document.getElementById("hasil")
-      .style.display =
-        "block";
-
-  }
-
-  catch(error){
-
-    alert(
-      "Belum berhasil bro:\n\n"+
-      error.message
+    showError(
+      'Radar Genius belum tersambung ke API.'
     );
 
   }
 
-  finally{
-
-    document.getElementById("loading")
-      .style.display =
-        "none";
-
-  }
-
 }
+
+
+loadRadar();
 
 </script>
 

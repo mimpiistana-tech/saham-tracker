@@ -987,17 +987,7 @@ async function loadRadar(){
     );
 
 
-    if(!response.ok){
-
-      response =
-      await fetch(
-        '/api/radar-test',
-        {
-          cache:'no-store'
-        }
-      );
-
-    }
+    
 
 
     if(!response.ok){

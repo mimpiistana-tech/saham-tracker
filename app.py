@@ -2,7 +2,7 @@ from flask import Flask, request, jsonify
 import requests
 import os
 import time
-
+from radar_score import score_from_broker_rows
 app = Flask(__name__)
 
 API_KEY = os.environ.get("INDEXALPHA_API_KEY")

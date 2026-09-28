@@ -15,13 +15,10 @@ def add_cors_headers(response):
     response.headers["Access-Control-Allow-Headers"] = "Content-Type"
     response.headers["Access-Control-Allow-Methods"] = "GET, OPTIONS"
     return response
-
 @app.route("/")
 def home():
-    return jsonify({
-        "status": "ok",
-        "app": "StockRadar API"
-    })
+    with open("index.html", encoding="utf-8"):
+        return f.read()
 
 @app.route("/api/broker")
 def broker():

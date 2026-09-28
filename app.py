@@ -17,7 +17,7 @@ def add_cors_headers(response):
     return response
 @app.route("/")
 def home():
-    with open("index.html", encoding="utf-8"):
+    with open("index.html", encoding="utf-8") as f:
         return f.read()
 
 @app.route("/api/broker")

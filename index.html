@@ -870,19 +870,7 @@ else if(brokerPressure < -0.05){
 netEl.className =
 'tile-value ' + pressureColor;
 
-  const netEl =
-  document
-  .getElementById('netFlow');
-
-  netEl.textContent =
-  (totalNet >= 0 ? '+' : '') +
-  compactNumber(totalNet);
-
-  netEl.className =
-  'tile-value ' +
-  (totalNet >= 0
-   ? 'green'
-   : 'red');
+ 
 
 
   document

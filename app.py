@@ -95,7 +95,121 @@ def broker():
             "success": False,
             "error": str(e)
         }), 500
+def extract_broker_rows(payload):
+    rows = []
 
+    def first_value(data, keys):
+        for key in keys:
+            if key in data and data[key] is not None:
+                return data[key]
+        return None
+
+    def walk(obj):
+        if isinstance(obj, dict):
+            low = {
+                str(k).lower(): v
+                for k, v in obj.items()
+            }
+
+            broker_code = first_value(low, [
+                "broker",
+                "broker_code",
+                "brokercode",
+                "code",
+                "name"
+            ])
+
+            buy = first_value(low, [
+                "buy",
+                "buy_value",
+                "buyvalue",
+                "bval",
+                "total_buy"
+            ])
+
+            sell = first_value(low, [
+                "sell",
+                "sell_value",
+                "sellvalue",
+                "sval",
+                "total_sell"
+            ])
+
+            net = first_value(low, [
+                "net",
+                "net_value",
+                "netvalue",
+                "nval",
+                "net_buy"
+            ])
+
+            if broker_code is not None and (
+                buy is not None
+                or sell is not None
+                or net is not None
+            ):
+                rows.append({
+                    "broker": broker_code,
+                    "buy": buy,
+                    "sell": sell,
+                    "net": net
+                })
+
+            for value in obj.values():
+                walk(value)
+
+        elif isinstance(obj, list):
+            for item in obj:
+                walk(item)
+
+    walk(payload)
+    return rows
+
+
+@app.route("/api/radar")
+def radar():
+    broker_result = broker()
+
+    if isinstance(broker_result, tuple):
+        response = broker_result[0]
+        status = broker_result[1]
+    else:
+        response = broker_result
+        status = 200
+
+    data = response.get_json()
+
+    if status != 200:
+        return jsonify({
+            "success": False,
+            "stage": "broker",
+            "status": status,
+            "detail": data
+        }), status
+
+    rows = extract_broker_rows(data)
+
+    if not rows:
+        return jsonify({
+            "success": False,
+            "error": "Format broker belum dikenali",
+            "raw_preview": str(data)[:1500]
+        }), 422
+
+    result = score_from_broker_rows(rows)
+
+    return jsonify({
+        "success": True,
+        "ticker": request.args.get(
+            "ticker", ""
+        ).upper(),
+        "cache": response.headers.get(
+            "X-StockRadar-Cache",
+            "UNKNOWN"
+        ),
+        "broker_rows_found": len(rows),
+        "result": result
+    })
 @app.route("/api/radar-test")
 def radar_test():
     rows = [

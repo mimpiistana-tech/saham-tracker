@@ -382,7 +382,7 @@ def score_broker_flow(rows: Iterable[Mapping[str, Any] | BrokerRow]) -> dict[str
 
     return {
         "score": round(score, 1),
-        "label": _broker_label(score),
+        "label": broker_label(score),
 
         "metrics": {
             "total_net": total_net,

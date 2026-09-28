@@ -235,33 +235,186 @@ def score_broker_flow(rows):
             "Net buy terkonsentrasi pada satu broker."
         )
 
+def score_broker_flow(rows: Iterable[Mapping[str, Any] | BrokerRow]) -> dict[str, Any]:
+    """
+    StockRadar Genius Broker Engine V2.
+
+    Tidak memakai total net seluruh broker sebagai sinyal utama,
+    karena total net market secara alami mendekati nol.
+
+    V2 membaca:
+    - konsentrasi Top 3 buyer vs Top 3 seller
+    - jumlah broker buyer vs seller
+    - dominasi broker terbesar
+    """
+
+    normalized: list[BrokerRow] = []
+
+    for row in rows:
+        item = (
+            row
+            if isinstance(row, BrokerRow)
+            else BrokerRow.from_mapping(row)
+        )
+
+        if item.net == 0 and item.buy == 0 and item.sell == 0:
+            continue
+
+        normalized.append(item)
+
+    positive = [x for x in normalized if x.net > 0]
+    negative = [x for x in normalized if x.net < 0]
+
+    positive_sorted = sorted(
+        positive,
+        key=lambda x: x.net,
+        reverse=True
+    )
+
+    negative_sorted = sorted(
+        negative,
+        key=lambda x: x.net
+    )
+
+    positive_net = sum(x.net for x in positive)
+    negative_net_abs = sum(abs(x.net) for x in negative)
+
+    total_net = positive_net - negative_net_abs
+    active = len(positive) + len(negative)
+
+    if positive_net > 0:
+        top_buyer_share = (
+            positive_sorted[0].net / positive_net
+            if positive_sorted else 0.0
+        )
+
+        buyer_top3_share = (
+            sum(x.net for x in positive_sorted[:3])
+            / positive_net
+        )
+    else:
+        top_buyer_share = 0.0
+        buyer_top3_share = 0.0
+
+    if negative_net_abs > 0:
+        top_seller_share = (
+            abs(negative_sorted[0].net)
+            / negative_net_abs
+            if negative_sorted else 0.0
+        )
+
+        seller_top3_share = (
+            sum(abs(x.net) for x in negative_sorted[:3])
+            / negative_net_abs
+        )
+    else:
+        top_seller_share = 0.0
+        seller_top3_share = 0.0
+
+    # Positif = buyer lebih terkonsentrasi
+    concentration_edge = (
+        buyer_top3_share - seller_top3_share
+    )
+
+    # Positif = sedikit buyer menyerap banyak seller
+    breadth_edge = (
+        (len(negative) - len(positive)) / active
+        if active > 0 else 0.0
+    )
+
+    # Positif = broker buyer terbesar lebih dominan
+    top1_edge = (
+        top_buyer_share - top_seller_share
+    )
+
+    broker_pressure = (
+        0.55 * concentration_edge
+        + 0.30 * breadth_edge
+        + 0.15 * top1_edge
+    )
+
+    broker_pressure = max(
+        -1.0,
+        min(1.0, broker_pressure)
+    )
+
+    score = clamp(
+        50.0 + (broker_pressure * 50.0)
+    )
+
+    notes: list[str] = []
+
+    if score >= 70:
+        notes.append(
+            "Buyer broker terlihat lebih terkonsentrasi; indikasi akumulasi perlu dipantau."
+        )
+    elif score >= 58:
+        notes.append(
+            "Tekanan broker condong ke sisi akumulasi."
+        )
+    elif score <= 30:
+        notes.append(
+            "Seller broker terlihat lebih terkonsentrasi; indikasi distribusi perlu diwaspadai."
+        )
+    elif score <= 42:
+        notes.append(
+            "Tekanan broker condong ke sisi distribusi."
+        )
+    else:
+        notes.append(
+            "Struktur broker masih relatif seimbang."
+        )
+
+    if active < 10:
+        notes.append(
+            "Broker aktif masih sedikit; keyakinan sinyal lebih rendah."
+        )
+
+    if buyer_top3_share >= 0.50:
+        notes.append(
+            "Top 3 buyer memegang porsi besar dari total net buy."
+        )
+
+    if seller_top3_share >= 0.50:
+        notes.append(
+            "Top 3 seller memegang porsi besar dari total net sell."
+        )
+
     return {
-
         "score": round(score, 1),
-
-        "label": broker_label(score),
+        "label": _broker_label(score),
 
         "metrics": {
-
             "total_net": total_net,
-
             "positive_net": positive_net,
-
             "negative_net_abs": negative_net_abs,
 
-            "imbalance": round(imbalance, 4),
+            "imbalance": round(
+                broker_pressure, 4
+            ),
 
-            "breadth": round(breadth, 4),
+            "breadth": round(
+                breadth_edge, 4
+            ),
 
             "buyers": len(positive),
-
             "sellers": len(negative),
-
             "active_brokers": active,
 
             "top_buyer_share": round(
-                top_buyer_share,
-                4
+                top_buyer_share, 4
+            ),
+
+            "top_seller_share": round(
+                top_seller_share, 4
+            ),
+
+            "buyer_top3_share": round(
+                buyer_top3_share, 4
+            ),
+
+            "seller_top3_share": round(
+                seller_top3_share, 4
             ),
         },
 

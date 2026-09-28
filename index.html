@@ -784,7 +784,7 @@ function renderBrokerTable(rows,id){
 function renderRadar(raw){
 
   const data =
-  raw.data || raw;
+  raw.data || raw.result || raw;
 
   const radar =
   data.radar || {};

@@ -96,7 +96,22 @@ def broker():
             "error": str(e)
         }), 500
 
+@app.route("/api/radar-test")
+def radar_test():
+    rows = [
+        {"broker": "CC", "net": 12400000},
+        {"broker": "XC", "net": 9100000},
+        {"broker": "YP", "net": -3000000},
+        {"broker": "ZP", "net": -2000000},
+    ]
 
+    result = score_from_broker_rows(rows)
+
+    return jsonify({
+        "success": True,
+        "ticker": "TEST",
+        "result": result
+    })
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)

@@ -1068,7 +1068,7 @@ encodeURIComponent(ticker) +
     const data =
     await response.json();
     localStorage.setItem(
-  'stockradar_last_data',
+  'stockradar_data_' + ticker,
   JSON.stringify({
     savedAt: Date.now(),
     data: data
@@ -1107,18 +1107,32 @@ function loadCachedRadar(){
 
   try{
 
-    const saved =
-    localStorage.getItem(
-      'stockradar_last_data'
-    );
+    const ticker =
+document
+.getElementById('tickerInput')
+.value
+.trim()
+.toUpperCase();
+
+const saved =
+localStorage.getItem(
+  'stockradar_data_' + ticker
+);
+    
 
     if(!saved){
-      document
-      .getElementById('apiStatus')
-      .textContent = '● Ready';
 
-      return;
-    }
+  document.getElementById('apiStatus').textContent = '● Ready';
+  document.getElementById('radarScore').textContent = '--';
+  document.getElementById('brokerScore').textContent = '--';
+  document.getElementById('coverage').textContent = '--%';
+  document.getElementById('netFlow').textContent = '--';
+  document.getElementById('activeBrokers').textContent = '--';
+  document.getElementById('geniusConclusion').textContent =
+    'Belum ada cache untuk ' + ticker;
+
+  return;
+}
 
     const cached =
     JSON.parse(saved);
@@ -1140,7 +1154,19 @@ function loadCachedRadar(){
   }
 
 }
+document
+.getElementById('tickerInput')
+.addEventListener('change', () => {
 
+  const input =
+  document.getElementById('tickerInput');
+
+  input.value =
+  input.value.trim().toUpperCase();
+
+  loadCachedRadar();
+
+});
 loadCachedRadar();
 </script>
 

@@ -3,8 +3,15 @@ import requests
 import os
 import time
 from datetime import datetime, timedelta
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from radar_score import score_from_broker_rows, score_from_market_data
+from radar_score import (
+    score_from_broker_rows,
+    score_from_market_data,
+    score_trend_ohlcv,
+    score_volume_ohlcv,
+    score_risk_ohlcv,
+)
 
 app = Flask(__name__)
 
@@ -12,6 +19,15 @@ API_KEY = os.environ.get("INDEXALPHA_API_KEY")
 BASE_URL = "https://api.indexalpha.id"
 CACHE = {}
 CACHE_TTL = 60 * 60 * 24
+
+SCANNER_UNIVERSE = [
+    "BBCA", "BBRI", "BMRI", "BBNI", "BRIS",
+    "TLKM", "ASII", "GOTO", "AMMN", "BREN",
+    "TPIA", "BRPT", "ADRO", "PTBA", "ANTM",
+    "MDKA", "INCO", "PGAS", "UNTR", "ESSA",
+    "ICBP", "INDF", "KLBF", "CPIN", "JPFA",
+    "MAPI", "ERAA", "PANI", "NAYZ", "PIPA",
+]
 
 
 @app.after_request
@@ -364,6 +380,142 @@ def extract_ohlcv_rows(payload):
         })
 
     return rows
+
+
+def scan_one_ticker(ticker, date_to):
+    data, status, cache_state = get_ohlcv(ticker, date_to)
+
+    if status != 200:
+        return None
+
+    rows = extract_ohlcv_rows(data)
+
+    if len(rows) < 20:
+        return None
+
+    trend = score_trend_ohlcv(rows)
+    volume = score_volume_ohlcv(rows)
+    risk = score_risk_ohlcv(rows)
+
+    if not (
+        trend.get("available")
+        and volume.get("available")
+        and risk.get("available")
+    ):
+        return None
+
+    trend_score = float(trend["score"])
+    volume_score = float(volume["score"])
+    risk_score = float(risk["score"])
+
+    scanner_score = (
+        0.45 * trend_score
+        + 0.35 * volume_score
+        + 0.20 * risk_score
+    )
+
+    trend_metrics = trend.get("metrics", {})
+    volume_metrics = volume.get("metrics", {})
+    risk_metrics = risk.get("metrics", {})
+
+    close = float(trend_metrics.get("latest_close") or 0)
+    ma20 = float(trend_metrics.get("ma20") or 0)
+    atr14 = float(risk_metrics.get("atr14") or 0)
+
+    if (
+        trend_score >= 65
+        and volume_score >= 60
+        and risk_score >= 55
+    ):
+        setup = "Momentum"
+    elif (
+        trend_score >= 60
+        and risk_score >= 55
+    ):
+        setup = "Watch Pullback"
+    elif (
+        trend_score >= 52
+        and volume_score >= 55
+    ):
+        setup = "Early Watch"
+    else:
+        setup = "Netral"
+
+    entry_low = max(0.0, ma20 - (0.50 * atr14))
+    entry_high = max(0.0, ma20 + (0.35 * atr14))
+
+    return {
+        "ticker": ticker,
+        "score": round(scanner_score, 1),
+        "setup": setup,
+        "close": round(close, 2),
+        "entry_low": round(entry_low, 2),
+        "entry_high": round(entry_high, 2),
+        "trend_score": round(trend_score, 1),
+        "volume_score": round(volume_score, 1),
+        "risk_score": round(risk_score, 1),
+        "momentum_20d": trend_metrics.get("momentum_20d"),
+        "volume_ratio": volume_metrics.get("volume_ratio"),
+        "atr_pct": risk_metrics.get("atr_pct"),
+        "cache": cache_state,
+    }
+
+
+@app.route("/api/scanner")
+def scanner():
+    date_to = request.args.get("to")
+
+    if not date_to:
+        return jsonify({
+            "success": False,
+            "error": "Parameter to wajib diisi",
+        }), 400
+
+    try:
+        datetime.strptime(date_to, "%Y-%m-%d")
+    except ValueError:
+        return jsonify({
+            "success": False,
+            "error": "Format tanggal harus YYYY-MM-DD",
+        }), 400
+
+    results = []
+
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        futures = {
+            executor.submit(
+                scan_one_ticker,
+                ticker,
+                date_to,
+            ): ticker
+            for ticker in SCANNER_UNIVERSE
+        }
+
+        for future in as_completed(futures):
+            try:
+                item = future.result()
+            except Exception:
+                item = None
+
+            if item:
+                results.append(item)
+
+    results.sort(
+        key=lambda x: x["score"],
+        reverse=True,
+    )
+
+    top = results[:10]
+
+    return jsonify({
+        "success": True,
+        "date": date_to,
+        "source": "Yahoo Finance OHLCV",
+        "universe_size": len(SCANNER_UNIVERSE),
+        "scanned": len(results),
+        "note": "Scanner awal tidak memakai broker summary agar hemat kuota IndexAlpha. Pilih kandidat lalu jalankan analisa full untuk konfirmasi broker.",
+        "results": top,
+    })
 
 
 @app.route("/api/radar")

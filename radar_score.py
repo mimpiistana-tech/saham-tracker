@@ -1,4 +1,4 @@
-"""StockRadar Genius - Radar Score Engine V3."""
+"""StockRadar Genius - Radar Score Engine V4."""
 
 from dataclasses import dataclass, asdict
 from math import isfinite
@@ -465,6 +465,144 @@ def score_volume_ohlcv(rows):
     }
 
 
+def risk_label(score):
+    if score >= 75:
+        return "Risiko Terkendali"
+    if score >= 60:
+        return "Cukup Terkendali"
+    if score >= 45:
+        return "Sedang"
+    if score >= 30:
+        return "Tinggi"
+    return "Sangat Tinggi"
+
+
+def score_risk_ohlcv(rows):
+    """
+    Skor risk teknikal: makin tinggi = risiko harga makin terkendali.
+
+    Dibaca dari:
+    - ATR14 sebagai persentase harga
+    - drawdown dari high 20 hari
+    - range harian terbaru
+    - perubahan harga harian ekstrem
+    """
+    data = _clean_ohlcv_rows(rows)
+    n = len(data)
+
+    if n < 20:
+        return {
+            "available": False,
+            "score": None,
+            "label": "Data risk belum cukup",
+            "metrics": {"bars": n},
+            "notes": ["Butuh minimal 20 hari bursa untuk membaca risiko teknikal."],
+        }
+
+    latest = data[-1]
+    latest_close = latest["close"]
+
+    true_ranges = []
+
+    for i in range(1, n):
+        current = data[i]
+        prev_close = data[i - 1]["close"]
+
+        high = current["high"] or current["close"]
+        low = current["low"] or current["close"]
+
+        tr = max(
+            high - low,
+            abs(high - prev_close),
+            abs(low - prev_close),
+        )
+
+        true_ranges.append(max(0.0, tr))
+
+    atr14 = _mean(true_ranges[-14:])
+    atr_pct = atr14 / latest_close if latest_close > 0 else 0.0
+
+    recent20 = data[-20:]
+    high20 = max(
+        (x["high"] or x["close"])
+        for x in recent20
+    )
+
+    drawdown20 = (
+        latest_close / high20 - 1.0
+        if high20 > 0 else 0.0
+    )
+
+    latest_high = latest["high"] or latest_close
+    latest_low = latest["low"] or latest_close
+
+    day_range_pct = (
+        (latest_high - latest_low) / latest_close
+        if latest_close > 0 else 0.0
+    )
+
+    prev_close = data[-2]["close"]
+    change_1d = (
+        latest_close / prev_close - 1.0
+        if prev_close > 0 else 0.0
+    )
+
+    score = 80.0
+
+    # ATR: <=2% relatif tenang, >5% mulai agresif.
+    if atr_pct > 0.02:
+        score -= min(30.0, ((atr_pct - 0.02) / 0.04) * 30.0)
+
+    # Drawdown dari puncak 20 hari.
+    if drawdown20 < -0.03:
+        score -= min(25.0, ((abs(drawdown20) - 0.03) / 0.17) * 25.0)
+
+    # Range harian besar menambah risiko eksekusi.
+    if day_range_pct > 0.03:
+        score -= min(15.0, ((day_range_pct - 0.03) / 0.07) * 15.0)
+
+    # Gerak harian ekstrem diberi penalti.
+    if abs(change_1d) > 0.04:
+        score -= min(10.0, ((abs(change_1d) - 0.04) / 0.10) * 10.0)
+
+    score = clamp(score)
+
+    notes = []
+
+    if atr_pct <= 0.025:
+        notes.append("ATR14 relatif rendah; volatilitas harian cukup terkendali.")
+    elif atr_pct <= 0.045:
+        notes.append("ATR14 berada di level menengah.")
+    else:
+        notes.append("ATR14 tinggi; pergerakan harga lebih agresif.")
+
+    if drawdown20 >= -0.05:
+        notes.append("Harga masih dekat area high 20 hari.")
+    elif drawdown20 >= -0.12:
+        notes.append("Harga mengalami drawdown menengah dari high 20 hari.")
+    else:
+        notes.append("Drawdown dari high 20 hari cukup dalam.")
+
+    if day_range_pct >= 0.06:
+        notes.append("Range harian lebar; risiko slippage dan false break meningkat.")
+
+    return {
+        "available": True,
+        "score": round(score, 1),
+        "label": risk_label(score),
+        "metrics": {
+            "bars": n,
+            "atr14": round(atr14, 2),
+            "atr_pct": round(atr_pct, 4),
+            "high20": round(high20, 2),
+            "drawdown_20d": round(drawdown20, 4),
+            "day_range_pct": round(day_range_pct, 4),
+            "price_change_1d": round(change_1d, 4),
+        },
+        "notes": notes,
+    }
+
+
 def overall_label(score, coverage):
     prefix = ""
 
@@ -539,6 +677,7 @@ def score_from_market_data(broker_rows, ohlcv_rows):
     broker = score_broker_flow(broker_rows)
     trend = score_trend_ohlcv(ohlcv_rows)
     volume = score_volume_ohlcv(ohlcv_rows)
+    risk = score_risk_ohlcv(ohlcv_rows)
 
     components = {
         "broker": broker["score"],
@@ -550,6 +689,9 @@ def score_from_market_data(broker_rows, ohlcv_rows):
     if volume.get("available"):
         components["volume"] = volume["score"]
 
+    if risk.get("available"):
+        components["risk"] = risk["score"]
+
     radar = build_radar_score(components)
 
     return {
@@ -557,4 +699,5 @@ def score_from_market_data(broker_rows, ohlcv_rows):
         "broker": broker,
         "trend": trend,
         "volume": volume,
+        "risk": risk,
     }

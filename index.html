@@ -992,11 +992,17 @@ async function loadRadar(){
 
     if(!response.ok){
 
-      throw new Error(
-        'API belum merespons'
-      );
+  const errorText =
+  await response.text();
 
-    }
+  throw new Error(
+    'HTTP ' +
+    response.status +
+    ' - ' +
+    errorText
+  );
+
+}
 
 
     const data =

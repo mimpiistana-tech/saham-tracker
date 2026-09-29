@@ -1333,19 +1333,20 @@ async function runScanner(){
     }
 
     const data = await response.json();
-    const rows = data.results || [];
+    const groups = data.groups || {};
 
-    if(!rows.length){
-      target.innerHTML =
-      '<div class="note">Belum ada kandidat yang lolos filter.</div>';
-      return;
-    }
+    const sections = [
+      ['🔥 Momentum', groups.momentum || []],
+      ['🟢 Watch Pullback', groups.pullback || []],
+      ['🟡 Early Watch', groups.early || []],
+      ['⚪ Neutral', groups.neutral || []],
+    ];
 
-    target.innerHTML =
-    rows.map((x,i)=>`
+    const renderRows = (rows) =>
+    rows.map((x)=>`
       <div class="status-box">
         <div class="status-title">
-          #${i+1} • ${x.ticker} • ${x.setup}
+          ${x.ticker} • ${x.setup}
         </div>
         <div class="status-value">
           Scanner Score ${Number(x.score).toFixed(1)}
@@ -1364,6 +1365,18 @@ async function runScanner(){
         </button>
       </div>
     `).join('');
+
+    const html = sections
+    .filter(([,rows]) => rows.length)
+    .map(([title,rows]) => `
+      <div class="note" style="font-weight:800;margin-top:14px">
+        ${title}
+      </div>
+      ${renderRows(rows)}
+    `).join('');
+
+    target.innerHTML =
+    html || '<div class="note">Belum ada kandidat yang lolos filter.</div>';
 
   }catch(error){
     target.innerHTML =

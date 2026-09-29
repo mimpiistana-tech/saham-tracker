@@ -968,7 +968,8 @@ function renderRadar(raw){
   .textContent =
   risk.label || 'Belum tersedia';
 
-  const signalAction = signal.action || 'WAIT';
+  const hasSignal = Boolean(signal && signal.action);
+  const signalAction = hasSignal ? signal.action : '--';
   const signalEl = document.getElementById('signalAction');
   signalEl.textContent = signalAction;
 
@@ -980,7 +981,7 @@ function renderRadar(raw){
   document
   .getElementById('signalLabel')
   .textContent =
-  signal.label || 'Tunggu analisa';
+  hasSignal ? (signal.label || 'Tunggu analisa') : 'Belum dihitung';
 
 
   const brokerPressure =
@@ -1091,22 +1092,26 @@ netEl.className =
   document
   .getElementById('signalDetail')
   .textContent =
-  (signal.action || 'WAIT') + ' • ' + (signal.label || 'Tunggu Konfirmasi') +
-  ' • Confidence ' + Number(signal.confidence || 0).toFixed(1);
+  hasSignal
+  ? signal.action + ' • ' + (signal.label || 'Tunggu Konfirmasi') +
+    ' • Confidence ' + Number(signal.confidence || 0).toFixed(1)
+  : 'Belum dihitung';
 
   document
   .getElementById('signalReason')
   .textContent =
-  signal.reason || 'Belum ada alasan sinyal.';
+  hasSignal ? (signal.reason || 'Belum ada alasan sinyal.') : 'Tekan Refresh Radar untuk menghitung sinyal terbaru.';
 
   const levels = signal.levels || {};
   document
   .getElementById('signalLevels')
   .innerHTML =
-  'Buy pullback: <b>' + compactNumber(levels.buy_pullback_low) + ' - ' + compactNumber(levels.buy_pullback_high) + '</b><br>' +
-  'Buy breakout: <b>di atas ' + compactNumber(levels.buy_breakout_above) + '</b><br>' +
-  'Invalidasi / cut loss: <b>' + compactNumber(levels.invalidation) + '</b><br>' +
-  'TP referensi: <b>' + compactNumber(levels.tp1_reference) + ' / ' + compactNumber(levels.tp2_reference) + '</b>';
+  hasSignal
+  ? 'Buy pullback: <b>' + compactNumber(levels.buy_pullback_low) + ' - ' + compactNumber(levels.buy_pullback_high) + '</b><br>' +
+    'Buy breakout: <b>di atas ' + compactNumber(levels.buy_breakout_above) + '</b><br>' +
+    'Invalidasi / cut loss: <b>' + compactNumber(levels.invalidation) + '</b><br>' +
+    'TP referensi: <b>' + compactNumber(levels.tp1_reference) + ' / ' + compactNumber(levels.tp2_reference) + '</b>'
+  : 'Belum ada level trade.';
 
   const notes = [];
 

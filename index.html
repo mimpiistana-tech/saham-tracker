@@ -392,13 +392,19 @@ td{
     </div>
 
   </div>
- <input
+ 
+  <input
   id="tickerInput"
   type="text"
   maxlength="4"
   placeholder="Kode saham, contoh: BBRI"
   value="BBRI"
   autocomplete="off"
+/>
+
+<input
+  id="dateInput"
+  type="date"
 />
   <button id="refreshBtn" class="refresh" onclick="loadRadar()">
     🔄 Refresh Radar
@@ -982,7 +988,15 @@ document
 .value
 .trim()
 .toUpperCase();
+const date =
+document
+.getElementById('dateInput')
+.value;
 
+if(!date){
+  alert('Pilih tanggal dulu.');
+  return;
+  }
 if(!ticker){
   alert('Masukkan kode saham dulu.');
   return;
@@ -1040,7 +1054,10 @@ if(refreshBtn){
     await fetch(
       '/api/radar?ticker=' +
 encodeURIComponent(ticker) +
-'&from=2026-09-28&to=2026-09-28',
+'&from=' +
+encodeURIComponent(date) +
+'&to=' +
+encodeURIComponent(date),
       {
         cache:'no-store'
       }
@@ -1067,8 +1084,9 @@ encodeURIComponent(ticker) +
 
     const data =
     await response.json();
-    localStorage.setItem(
-  'stockradar_data_' + ticker,
+    
+  localStorage.setItem(
+  'stockradar_data_' + ticker + '_' + date,
   JSON.stringify({
     savedAt: Date.now(),
     data: data
@@ -1113,10 +1131,13 @@ document
 .value
 .trim()
 .toUpperCase();
-
+const date =
+document
+.getElementById('dateInput')
+.value;
 const saved =
 localStorage.getItem(
-  'stockradar_data_' + ticker
+  'stockradar_data_' + ticker + '_' + date
 );
     
 
@@ -1166,6 +1187,19 @@ document
 
   loadCachedRadar();
 
+});
+const dateInput =
+document.getElementById('dateInput');
+
+if(!dateInput.value){
+  dateInput.value =
+  new Intl.DateTimeFormat(
+    'en-CA',
+    { timeZone: 'Asia/Jakarta' }
+  ).format(new Date());
+  }
+  dateInput.addEventListener('change', () => {
+  loadCachedRadar();
 });
 loadCachedRadar();
 </script>

@@ -559,7 +559,35 @@ def scanner():
         reverse=True,
     )
 
-    top = results[:15]
+    groups = {
+        "momentum": [
+            x for x in results
+            if x["setup"] == "Momentum"
+        ][:8],
+        "pullback": [
+            x for x in results
+            if x["setup"] == "Watch Pullback"
+        ][:8],
+        "early": [
+            x for x in results
+            if x["setup"] == "Early Watch"
+        ][:6],
+        "neutral": [
+            x for x in results
+            if x["setup"] == "Netral"
+        ][:5],
+    }
+
+    actionable = (
+        groups["momentum"]
+        + groups["pullback"]
+        + groups["early"]
+    )
+
+    actionable.sort(
+        key=lambda x: x["score"],
+        reverse=True,
+    )
 
     return jsonify({
         "success": True,
@@ -568,8 +596,16 @@ def scanner():
         "universe_size": len(SCANNER_UNIVERSE),
         "scanned": len(results),
         "liquidity_filter": "avg value 20D >= Rp2B dan minimal 15 hari aktif",
-        "note": "Scanner luas tidak memakai broker summary agar hemat kuota IndexAlpha. Pilih kandidat lalu jalankan analisa full untuk konfirmasi broker.",
-        "results": top,
+        "note": "Scanner V2 memisahkan Momentum, Watch Pullback, Early Watch, dan Neutral. Analisa Full dipakai untuk konfirmasi broker.",
+        "summary": {
+            "momentum": len(groups["momentum"]),
+            "pullback": len(groups["pullback"]),
+            "early": len(groups["early"]),
+            "neutral": len(groups["neutral"]),
+            "actionable": len(actionable),
+        },
+        "groups": groups,
+        "results": actionable[:15],
     })
 
 

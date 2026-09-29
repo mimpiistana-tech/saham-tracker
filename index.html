@@ -526,6 +526,11 @@ td{
     ⚙️ Engine
   </button>
 
+  <button class="tab"
+    onclick="openTab('scanner',this)">
+    📡 Scanner
+  </button>
+
 </div>
 
 
@@ -762,6 +767,25 @@ berapa persen mesin yang sudah aktif.
 
 </div>
 
+</section>
+
+<section id="scanner" class="section">
+  <div class="card">
+    <h2>📡 Radar Scanner IDX</h2>
+    <div class="note">
+      Mesin menyapu kandidat saham otomatis dari data trend, volume, dan risk. Broker summary tidak dipakai saat scan awal agar kuota IndexAlpha tetap hemat.
+    </div>
+    <button class="refresh" onclick="runScanner()">
+      🔎 Cari Kandidat Hari Ini
+    </button>
+  </div>
+
+  <div class="card">
+    <h2>🏆 Kandidat Teratas</h2>
+    <div id="scannerResults">
+      <div class="loading">Belum discan.</div>
+    </div>
+  </div>
 </section>
 
 </div>
@@ -1254,6 +1278,102 @@ netEl.className =
   'online';
 }
 
+
+async function runScanner(){
+  const date =
+  document
+  .getElementById('dateInput')
+  .value;
+
+  if(!date){
+    alert('Pilih tanggal dulu.');
+    return;
+  }
+
+  const target =
+  document.getElementById('scannerResults');
+
+  target.innerHTML =
+  '<div class="loading">Memindai saham IDX...</div>';
+
+  try{
+    const response =
+    await fetch(
+      'https://saham-tracker-api.onrender.com/api/scanner?to=' +
+      encodeURIComponent(date),
+      {cache:'no-store'}
+    );
+
+    if(!response.ok){
+      const txt = await response.text();
+      throw new Error('HTTP ' + response.status + ' - ' + txt);
+    }
+
+    const data = await response.json();
+    const rows = data.results || [];
+
+    if(!rows.length){
+      target.innerHTML =
+      '<div class="note">Belum ada kandidat yang lolos filter.</div>';
+      return;
+    }
+
+    target.innerHTML =
+    rows.map((x,i)=>`
+      <div class="status-box">
+        <div class="status-title">
+          #${i+1} • ${x.ticker} • ${x.setup}
+        </div>
+        <div class="status-value">
+          Scanner Score ${Number(x.score).toFixed(1)}
+        </div>
+        <div class="small" style="margin-top:6px;line-height:1.6">
+          Trend ${Number(x.trend_score).toFixed(1)}
+          • Volume ${Number(x.volume_score).toFixed(1)}
+          • Risk ${Number(x.risk_score).toFixed(1)}<br>
+          Harga ${compactNumber(x.close)}
+          • Area entry awal ${compactNumber(x.entry_low)}-${compactNumber(x.entry_high)}
+        </div>
+        <button class="refresh"
+          style="margin-top:9px"
+          onclick="analyzeCandidate('${x.ticker}')">
+          Analisa Full ${x.ticker}
+        </button>
+      </div>
+    `).join('');
+
+  }catch(error){
+    target.innerHTML =
+    '<div class="note error">Scanner error: ' +
+    error.message +
+    '</div>';
+  }
+}
+
+function analyzeCandidate(ticker){
+  const input =
+  document.getElementById('tickerInput');
+
+  input.value = ticker;
+
+  document
+  .querySelectorAll('.section')
+  .forEach(x=>x.classList.remove('active-section'));
+
+  document
+  .getElementById('overview')
+  .classList.add('active-section');
+
+  document
+  .querySelectorAll('.tab')
+  .forEach(x=>x.classList.remove('active'));
+
+  document
+  .querySelector('.tab')
+  .classList.add('active');
+
+  window.scrollTo({top:0,behavior:'smooth'});
+}
 
 function showError(message){
 

@@ -213,6 +213,10 @@ def extract_broker_rows(payload):
 
 
 def get_ohlcv(ticker, date_to):
+    """
+    Ambil OHLCV dari Yahoo Finance supaya kuota IndexAlpha hanya
+    dipakai untuk broker summary. Ini menghemat request free plan.
+    """
     try:
         end_date = datetime.strptime(date_to, "%Y-%m-%d").date()
     except ValueError:
@@ -221,25 +225,97 @@ def get_ohlcv(ticker, date_to):
             "error": "Format tanggal harus YYYY-MM-DD",
         }, 400, "MISS"
 
-    start_date = end_date - timedelta(days=120)
+    start_date = end_date - timedelta(days=180)
+    symbol = f"{ticker}.JK"
 
-    if start_date < datetime(2025, 1, 1).date():
-        start_date = datetime(2025, 1, 1).date()
+    cache_key = f"yahoo_ohlcv_{symbol}_{start_date.isoformat()}_{end_date.isoformat()}"
+    cached, cache_state = cache_get(cache_key)
 
-    date_from = start_date.isoformat()
-    date_to = end_date.isoformat()
+    if cached and cache_state == "HIT":
+        return cached["data"], cached["status"], "HIT"
 
-    cache_key = f"ohlcv_{ticker}_{date_from}_{date_to}"
+    period1 = int(datetime.combine(start_date, datetime.min.time()).timestamp())
+    period2_date = end_date + timedelta(days=1)
+    period2 = int(datetime.combine(period2_date, datetime.min.time()).timestamp())
 
-    return indexalpha_get(
-        "/stocks/ohlcv",
-        {
-            "ticker": ticker,
-            "from": date_from,
-            "to": date_to,
-        },
-        cache_key,
-    )
+    try:
+        response = requests.get(
+            f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}",
+            params={
+                "period1": period1,
+                "period2": period2,
+                "interval": "1d",
+                "events": "history",
+                "includeAdjustedClose": "true",
+            },
+            headers={
+                "User-Agent": "Mozilla/5.0 StockRadar/1.0",
+                "accept": "application/json",
+            },
+            timeout=25,
+        )
+
+        if response.status_code != 200:
+            return {
+                "success": False,
+                "error": f"Yahoo OHLCV HTTP {response.status_code}",
+            }, response.status_code, "MISS"
+
+        payload = response.json()
+        chart = payload.get("chart") or {}
+        results = chart.get("result") or []
+
+        if not results:
+            return {
+                "success": False,
+                "error": "Yahoo OHLCV tidak menemukan data",
+            }, 404, "MISS"
+
+        result = results[0]
+        timestamps = result.get("timestamp") or []
+        quote_list = (
+            (result.get("indicators") or {}).get("quote") or [{}]
+        )
+        quote = quote_list[0] if quote_list else {}
+
+        opens = quote.get("open") or []
+        highs = quote.get("high") or []
+        lows = quote.get("low") or []
+        closes = quote.get("close") or []
+        volumes = quote.get("volume") or []
+
+        rows = []
+
+        for i, ts in enumerate(timestamps):
+            close = closes[i] if i < len(closes) else None
+
+            if close is None:
+                continue
+
+            rows.append({
+                "date": datetime.utcfromtimestamp(ts).date().isoformat(),
+                "open": opens[i] if i < len(opens) else None,
+                "high": highs[i] if i < len(highs) else None,
+                "low": lows[i] if i < len(lows) else None,
+                "close": close,
+                "volume": volumes[i] if i < len(volumes) else None,
+            })
+
+        data = {
+            "success": True,
+            "source": "yahoo_finance",
+            "symbol": symbol,
+            "data": rows,
+        }
+
+        cache_put(cache_key, data, 200)
+        return data, 200, "MISS"
+
+    except Exception as e:
+        return {
+            "success": False,
+            "error": f"Yahoo OHLCV error: {e}",
+        }, 500, "MISS"
 
 
 @app.route("/api/ohlcv")

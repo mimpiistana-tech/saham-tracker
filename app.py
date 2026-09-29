@@ -56,8 +56,8 @@ def broker():
         else:
             stale_cached = cached
 
-         try:
-            response = requests.get(
+    try:
+        response = requests.get(
             f"{BASE_URL}/stocks/broker-summary",
             headers={
                 "Authorization": f"Bearer {API_KEY}",
@@ -82,7 +82,7 @@ def broker():
                 "data": data,
                 "status": response.status_code
             }
-                if response.status_code != 200 and stale_cached is not None:
+        if response.status_code != 200 and stale_cached is not None:
             result = jsonify(stale_cached["data"])
             result.headers["X-StockRadar-Cache"] = "STALE"
             result.headers["X-StockRadar-Upstream-Status"] = str(response.status_code)

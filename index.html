@@ -320,6 +320,52 @@ td{
 .error{
   color:#ff8b96;
 }
+
+.trade-plan{
+  margin-top:12px;
+  padding:12px;
+  border-radius:14px;
+  background:#0b2033;
+  border:1px solid #214766;
+}
+
+.trade-plan-title{
+  font-size:12px;
+  font-weight:800;
+  color:#cfe4f5;
+  margin-bottom:9px;
+}
+
+.trade-plan-grid{
+  display:grid;
+  grid-template-columns:1fr 1fr 1fr;
+  gap:8px;
+}
+
+.trade-plan-box{
+  padding:10px 8px;
+  border-radius:11px;
+  background:#0e2a42;
+  text-align:center;
+}
+
+.trade-plan-label{
+  font-size:10px;
+  color:#8298ae;
+  margin-bottom:5px;
+}
+
+.trade-plan-value{
+  font-size:16px;
+  font-weight:900;
+}
+
+.trade-plan-note{
+  margin-top:8px;
+  font-size:10px;
+  color:#8298ae;
+  line-height:1.4;
+}
 </style>
 </head>
 
@@ -415,6 +461,27 @@ td{
       <div class="small">Buyer + seller</div>
     </div>
 
+  </div>
+
+  <div class="trade-plan">
+    <div class="trade-plan-title">🎯 RENCANA TRADE</div>
+    <div class="trade-plan-grid">
+      <div class="trade-plan-box">
+        <div class="trade-plan-label">BELI</div>
+        <div id="buyPrice" class="trade-plan-value green">--</div>
+      </div>
+      <div class="trade-plan-box">
+        <div class="trade-plan-label">JUAL / TP</div>
+        <div id="sellPrice" class="trade-plan-value blue">--</div>
+      </div>
+      <div class="trade-plan-box">
+        <div class="trade-plan-label">CUT LOSS</div>
+        <div id="cutLossPrice" class="trade-plan-value red">--</div>
+      </div>
+    </div>
+    <div id="tradePlanNote" class="trade-plan-note">
+      Tekan Refresh Radar untuk menghitung level harga.
+    </div>
   </div>
  
   <input
@@ -1103,14 +1170,44 @@ netEl.className =
   hasSignal ? (signal.reason || 'Belum ada alasan sinyal.') : 'Tekan Refresh Radar untuk menghitung sinyal terbaru.';
 
   const levels = signal.levels || {};
+
+  document
+  .getElementById('buyPrice')
+  .textContent =
+  hasSignal
+  ? compactNumber(levels.buy_pullback_low) + '-' + compactNumber(levels.buy_pullback_high)
+  : '--';
+
+  document
+  .getElementById('sellPrice')
+  .textContent =
+  hasSignal
+  ? compactNumber(levels.tp1_reference) + '/' + compactNumber(levels.tp2_reference)
+  : '--';
+
+  document
+  .getElementById('cutLossPrice')
+  .textContent =
+  hasSignal
+  ? compactNumber(levels.invalidation)
+  : '--';
+
+  document
+  .getElementById('tradePlanNote')
+  .textContent =
+  hasSignal
+  ? 'Breakout entry di atas ' + compactNumber(levels.buy_breakout_above) +
+    ' • Harga acuan ' + compactNumber(levels.close)
+  : 'Tekan Refresh Radar untuk menghitung level harga.';
+
   document
   .getElementById('signalLevels')
   .innerHTML =
   hasSignal
-  ? 'Buy pullback: <b>' + compactNumber(levels.buy_pullback_low) + ' - ' + compactNumber(levels.buy_pullback_high) + '</b><br>' +
-    'Buy breakout: <b>di atas ' + compactNumber(levels.buy_breakout_above) + '</b><br>' +
-    'Invalidasi / cut loss: <b>' + compactNumber(levels.invalidation) + '</b><br>' +
-    'TP referensi: <b>' + compactNumber(levels.tp1_reference) + ' / ' + compactNumber(levels.tp2_reference) + '</b>'
+  ? 'Beli pullback: <b>' + compactNumber(levels.buy_pullback_low) + ' - ' + compactNumber(levels.buy_pullback_high) + '</b><br>' +
+    'Beli breakout: <b>di atas ' + compactNumber(levels.buy_breakout_above) + '</b><br>' +
+    'Cut loss / invalidasi: <b>' + compactNumber(levels.invalidation) + '</b><br>' +
+    'Jual / take profit: <b>' + compactNumber(levels.tp1_reference) + ' / ' + compactNumber(levels.tp2_reference) + '</b>'
   : 'Belum ada level trade.';
 
   const notes = [];
@@ -1363,6 +1460,10 @@ localStorage.getItem(
   document.getElementById('signalDetail').textContent = '--';
   document.getElementById('signalReason').textContent = '--';
   document.getElementById('signalLevels').textContent = '--';
+  document.getElementById('buyPrice').textContent = '--';
+  document.getElementById('sellPrice').textContent = '--';
+  document.getElementById('cutLossPrice').textContent = '--';
+  document.getElementById('tradePlanNote').textContent = 'Tekan Refresh Radar untuk menghitung level harga.';
   document.getElementById('netFlow').textContent = '--';
   document.getElementById('activeBrokers').textContent = '--';
   document.getElementById('geniusConclusion').textContent =

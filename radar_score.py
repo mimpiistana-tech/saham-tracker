@@ -1,4 +1,4 @@
-"""StockRadar Genius - Radar Score Engine V1."""
+"""StockRadar Genius - Radar Score Engine V2."""
 
 from dataclasses import dataclass, asdict
 from math import isfinite
@@ -82,7 +82,6 @@ class BrokerRow:
 
     @classmethod
     def from_mapping(cls, row):
-
         broker = str(
             row.get("broker")
             or row.get("code")
@@ -117,145 +116,39 @@ class BrokerRow:
             broker=broker,
             buy=buy,
             sell=sell,
-            net=net
+            net=net,
         )
 
 
 def broker_label(score):
-
     if score >= 75:
         return "Akumulasi Kuat"
-
     if score >= 60:
         return "Akumulasi"
-
     if score >= 45:
         return "Seimbang"
-
     if score >= 30:
         return "Distribusi"
-
     return "Distribusi Kuat"
 
 
 def score_broker_flow(rows):
-
-    normalized = []
-
-    for row in rows:
-
-        if isinstance(row, BrokerRow):
-            item = row
-        else:
-            item = BrokerRow.from_mapping(row)
-
-        if item.net == 0 and item.buy == 0 and item.sell == 0:
-            continue
-
-        normalized.append(item)
-
-    positive = [x for x in normalized if x.net > 0]
-    negative = [x for x in normalized if x.net < 0]
-
-    positive_net = sum(x.net for x in positive)
-    negative_net_abs = sum(abs(x.net) for x in negative)
-
-    gross_net_flow = positive_net + negative_net_abs
-    total_net = positive_net - negative_net_abs
-
-    active = len(positive) + len(negative)
-
-    if gross_net_flow <= 0 or active == 0:
-
-        imbalance = 0.0
-        breadth = 0.0
-        score = 50.0
-
-    else:
-
-        imbalance = total_net / gross_net_flow
-
-        breadth = (
-            len(positive) - len(negative)
-        ) / active
-
-        imbalance_score = 50 + (50 * imbalance)
-        breadth_score = 50 + (50 * breadth)
-
-        score = clamp(
-            0.80 * imbalance_score
-            + 0.20 * breadth_score
-        )
-
-    positive_sorted = sorted(
-        positive,
-        key=lambda x: x.net,
-        reverse=True
-    )
-
-    negative_sorted = sorted(
-        negative,
-        key=lambda x: x.net
-    )
-
-    if positive_net > 0 and positive_sorted:
-
-        top_buyer_share = (
-            positive_sorted[0].net
-            / positive_net
-        )
-
-    else:
-        top_buyer_share = 0.0
-
-    notes = []
-
-    if score >= 60:
-        notes.append(
-            "Net flow broker cenderung akumulasi."
-        )
-
-    elif score < 45:
-        notes.append(
-            "Net flow broker cenderung distribusi."
-        )
-
-    else:
-        notes.append(
-            "Net flow broker relatif seimbang."
-        )
-
-    if active < 3:
-        notes.append(
-            "Broker aktif masih sedikit."
-        )
-
-    if top_buyer_share >= 0.70:
-        notes.append(
-            "Net buy terkonsentrasi pada satu broker."
-        )
-
-def score_broker_flow(rows: Iterable[Mapping[str, Any] | BrokerRow]) -> dict[str, Any]:
     """
     StockRadar Genius Broker Engine V2.
-
-    Tidak memakai total net seluruh broker sebagai sinyal utama,
-    karena total net market secara alami mendekati nol.
 
     V2 membaca:
     - konsentrasi Top 3 buyer vs Top 3 seller
     - jumlah broker buyer vs seller
     - dominasi broker terbesar
+
+    Total net seluruh broker tidak dipakai sebagai sinyal utama karena
+    secara alami jumlah buy dan sell market saling mengimbangi.
     """
 
-    normalized: list[BrokerRow] = []
+    normalized = []
 
     for row in rows:
-        item = (
-            row
-            if isinstance(row, BrokerRow)
-            else BrokerRow.from_mapping(row)
-        )
+        item = row if isinstance(row, BrokerRow) else BrokerRow.from_mapping(row)
 
         if item.net == 0 and item.buy == 0 and item.sell == 0:
             continue
@@ -268,17 +161,16 @@ def score_broker_flow(rows: Iterable[Mapping[str, Any] | BrokerRow]) -> dict[str
     positive_sorted = sorted(
         positive,
         key=lambda x: x.net,
-        reverse=True
+        reverse=True,
     )
 
     negative_sorted = sorted(
         negative,
-        key=lambda x: x.net
+        key=lambda x: x.net,
     )
 
     positive_net = sum(x.net for x in positive)
     negative_net_abs = sum(abs(x.net) for x in negative)
-
     total_net = positive_net - negative_net_abs
     active = len(positive) + len(negative)
 
@@ -289,8 +181,7 @@ def score_broker_flow(rows: Iterable[Mapping[str, Any] | BrokerRow]) -> dict[str
         )
 
         buyer_top3_share = (
-            sum(x.net for x in positive_sorted[:3])
-            / positive_net
+            sum(x.net for x in positive_sorted[:3]) / positive_net
         )
     else:
         top_buyer_share = 0.0
@@ -298,8 +189,7 @@ def score_broker_flow(rows: Iterable[Mapping[str, Any] | BrokerRow]) -> dict[str
 
     if negative_net_abs > 0:
         top_seller_share = (
-            abs(negative_sorted[0].net)
-            / negative_net_abs
+            abs(negative_sorted[0].net) / negative_net_abs
             if negative_sorted else 0.0
         )
 
@@ -311,21 +201,14 @@ def score_broker_flow(rows: Iterable[Mapping[str, Any] | BrokerRow]) -> dict[str
         top_seller_share = 0.0
         seller_top3_share = 0.0
 
-    # Positif = buyer lebih terkonsentrasi
-    concentration_edge = (
-        buyer_top3_share - seller_top3_share
-    )
+    concentration_edge = buyer_top3_share - seller_top3_share
 
-    # Positif = sedikit buyer menyerap banyak seller
     breadth_edge = (
         (len(negative) - len(positive)) / active
         if active > 0 else 0.0
     )
 
-    # Positif = broker buyer terbesar lebih dominan
-    top1_edge = (
-        top_buyer_share - top_seller_share
-    )
+    top1_edge = top_buyer_share - top_seller_share
 
     broker_pressure = (
         0.55 * concentration_edge
@@ -333,16 +216,10 @@ def score_broker_flow(rows: Iterable[Mapping[str, Any] | BrokerRow]) -> dict[str
         + 0.15 * top1_edge
     )
 
-    broker_pressure = max(
-        -1.0,
-        min(1.0, broker_pressure)
-    )
+    broker_pressure = max(-1.0, min(1.0, broker_pressure))
+    score = clamp(50.0 + (broker_pressure * 50.0))
 
-    score = clamp(
-        50.0 + (broker_pressure * 50.0)
-    )
-
-    notes: list[str] = []
+    notes = []
 
     if score >= 70:
         notes.append(
@@ -383,57 +260,33 @@ def score_broker_flow(rows: Iterable[Mapping[str, Any] | BrokerRow]) -> dict[str
     return {
         "score": round(score, 1),
         "label": broker_label(score),
-
         "metrics": {
             "total_net": total_net,
             "positive_net": positive_net,
             "negative_net_abs": negative_net_abs,
-
-            "imbalance": round(
-                broker_pressure, 4
-            ),
-
-            "breadth": round(
-                breadth_edge, 4
-            ),
-
+            "imbalance": round(broker_pressure, 4),
+            "breadth": round(breadth_edge, 4),
             "buyers": len(positive),
             "sellers": len(negative),
             "active_brokers": active,
-
-            "top_buyer_share": round(
-                top_buyer_share, 4
-            ),
-
-            "top_seller_share": round(
-                top_seller_share, 4
-            ),
-
-            "buyer_top3_share": round(
-                buyer_top3_share, 4
-            ),
-
-            "seller_top3_share": round(
-                seller_top3_share, 4
-            ),
+            "top_buyer_share": round(top_buyer_share, 4),
+            "top_seller_share": round(top_seller_share, 4),
+            "buyer_top3_share": round(buyer_top3_share, 4),
+            "seller_top3_share": round(seller_top3_share, 4),
         },
-
         "top_buyers": [
             asdict(x)
             for x in positive_sorted[:5]
         ],
-
         "top_sellers": [
             asdict(x)
             for x in negative_sorted[:5]
         ],
-
         "notes": notes,
     }
 
 
 def overall_label(score, coverage):
-
     prefix = ""
 
     if coverage < 100:
@@ -441,44 +294,33 @@ def overall_label(score, coverage):
 
     if score >= 80:
         return prefix + "Sangat Menarik Dipantau"
-
     if score >= 65:
         return prefix + "Menarik Dipantau"
-
     if score >= 50:
         return prefix + "Netral / Tunggu Konfirmasi"
-
     if score >= 35:
         return prefix + "Lemah"
-
     return prefix + "Risiko Tinggi"
 
 
 def build_radar_score(components):
-
     available = {}
-
     used_weight = 0.0
     weighted_sum = 0.0
 
     for name, weight in COMPONENT_WEIGHTS.items():
-
         value = components.get(name)
 
         if value is None:
             continue
 
         score = clamp(parse_number(value))
-
         available[name] = round(score, 1)
-
         used_weight += weight
-
         weighted_sum += score * weight
 
     if used_weight == 0:
         overall = 50.0
-
     else:
         overall = weighted_sum / used_weight
 
@@ -489,32 +331,21 @@ def build_radar_score(components):
     )
 
     return {
-
         "radar_score": round(overall, 1),
-
         "coverage": round(coverage, 1),
-
-        "label": overall_label(
-            overall,
-            coverage
-        ),
-
+        "label": overall_label(overall, coverage),
         "components": available,
-
         "missing_components": [
             x
             for x in COMPONENT_WEIGHTS
             if x not in available
         ],
-
         "weights": COMPONENT_WEIGHTS.copy(),
-
         "is_full_score": coverage >= 100,
     }
 
 
 def score_from_broker_rows(rows):
-
     broker = score_broker_flow(rows)
 
     radar = build_radar_score({
@@ -523,5 +354,5 @@ def score_from_broker_rows(rows):
 
     return {
         "radar": radar,
-        "broker": broker
-  }
+        "broker": broker,
+    }

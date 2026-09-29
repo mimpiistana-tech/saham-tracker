@@ -603,6 +603,151 @@ def score_risk_ohlcv(rows):
     }
 
 
+def build_trade_signal(broker, trend, volume, risk, rows):
+    """
+    Sinyal swing harian berbasis konfirmasi, bukan auto-trading.
+    BUY hanya muncul bila beberapa komponen sepakat.
+    """
+    data = _clean_ohlcv_rows(rows)
+
+    if len(data) < 20:
+        return {
+            "action": "WAIT",
+            "label": "Tunggu Data",
+            "confidence": 0,
+            "reason": "Data harga belum cukup.",
+            "levels": {},
+        }
+
+    latest = data[-1]
+    close = latest["close"]
+    recent20 = data[-20:]
+
+    support20 = min(
+        (x["low"] or x["close"])
+        for x in recent20
+    )
+    resistance20 = max(
+        (x["high"] or x["close"])
+        for x in recent20
+    )
+
+    trend_metrics = trend.get("metrics", {})
+    risk_metrics = risk.get("metrics", {})
+
+    ma20 = parse_number(trend_metrics.get("ma20"))
+    atr14 = parse_number(risk_metrics.get("atr14"))
+
+    if atr14 <= 0:
+        atr14 = max(close * 0.02, 1.0)
+
+    broker_score = parse_number(broker.get("score"))
+    trend_score = parse_number(trend.get("score"))
+    volume_score = parse_number(volume.get("score"))
+    risk_score = parse_number(risk.get("score"))
+
+    composite = (
+        0.35 * broker_score
+        + 0.25 * trend_score
+        + 0.20 * volume_score
+        + 0.20 * risk_score
+    )
+
+    above_ma20 = ma20 > 0 and close >= ma20
+    near_support = (
+        support20 > 0
+        and close <= support20 + (1.2 * atr14)
+    )
+
+    breakout_ready = (
+        close >= resistance20 - (0.5 * atr14)
+        and volume_score >= 60
+        and trend_score >= 60
+    )
+
+    distribution_risk = (
+        broker_score <= 42
+        or volume_score <= 35
+        or trend_score <= 35
+    )
+
+    action = "WAIT"
+    label = "Tunggu Konfirmasi"
+    reason = (
+        "Belum ada konfirmasi cukup kuat untuk entry baru."
+    )
+
+    if (
+        trend_score >= 60
+        and broker_score >= 58
+        and risk_score >= 55
+        and above_ma20
+    ):
+        if near_support:
+            action = "BUY"
+            label = "Buy on Pullback"
+            reason = (
+                "Trend, broker, dan risk mendukung; harga berada dekat area support."
+            )
+        elif breakout_ready:
+            action = "BUY"
+            label = "Buy on Breakout"
+            reason = (
+                "Trend kuat dan volume mengonfirmasi area breakout."
+            )
+        else:
+            action = "WAIT"
+            label = "Tunggu Pullback"
+            reason = (
+                "Struktur cukup positif, tetapi harga belum berada di entry yang efisien."
+            )
+
+    if distribution_risk and close < ma20:
+        action = "SELL"
+        label = "Reduce / Exit"
+        reason = (
+            "Trend melemah atau tekanan distribusi meningkat dan harga berada di bawah MA20."
+        )
+
+    invalidation = max(
+        0.0,
+        min(support20, ma20 if ma20 > 0 else support20)
+        - (0.5 * atr14)
+    )
+
+    pullback_low = max(
+        invalidation,
+        (ma20 if ma20 > 0 else close) - (0.5 * atr14)
+    )
+    pullback_high = (
+        ma20 + (0.35 * atr14)
+        if ma20 > 0 else close
+    )
+
+    breakout_trigger = resistance20 + (0.15 * atr14)
+
+    tp1 = close + (1.5 * atr14)
+    tp2 = close + (3.0 * atr14)
+
+    return {
+        "action": action,
+        "label": label,
+        "confidence": round(clamp(composite), 1),
+        "reason": reason,
+        "levels": {
+            "close": round(close, 2),
+            "support20": round(support20, 2),
+            "resistance20": round(resistance20, 2),
+            "buy_pullback_low": round(pullback_low, 2),
+            "buy_pullback_high": round(pullback_high, 2),
+            "buy_breakout_above": round(breakout_trigger, 2),
+            "invalidation": round(invalidation, 2),
+            "tp1_reference": round(tp1, 2),
+            "tp2_reference": round(tp2, 2),
+        },
+    }
+
+
 def overall_label(score, coverage):
     prefix = ""
 
@@ -694,10 +839,19 @@ def score_from_market_data(broker_rows, ohlcv_rows):
 
     radar = build_radar_score(components)
 
+    signal = build_trade_signal(
+        broker,
+        trend,
+        volume,
+        risk,
+        ohlcv_rows,
+    )
+
     return {
         "radar": radar,
         "broker": broker,
         "trend": trend,
         "volume": volume,
         "risk": risk,
+        "signal": signal,
     }

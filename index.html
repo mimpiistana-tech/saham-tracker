@@ -330,7 +330,7 @@ td{
 <header>
   <div>
     <div class="logo">📈 Stock<span>Radar</span></div>
-    <div class="muted">Genius Engine V2 • Broker + Trend + Volume</div>
+    <div class="muted">Genius Engine V3 • Broker + Trend + Volume + Risk</div>
   </div>
 
   <div id="apiStatus" class="online">
@@ -389,6 +389,18 @@ td{
       <div class="tile-title">📊 VOLUME SCORE</div>
       <div id="volumeScore" class="tile-value blue">--</div>
       <div id="volumeLabel" class="small">Menunggu OHLCV</div>
+    </div>
+
+    <div class="tile">
+      <div class="tile-title">🛡️ RISK SCORE</div>
+      <div id="riskScore" class="tile-value yellow">--</div>
+      <div id="riskLabel" class="small">Menunggu OHLCV</div>
+    </div>
+
+    <div class="tile">
+      <div class="tile-title">🎯 TRADE SIGNAL</div>
+      <div id="signalAction" class="tile-value yellow">--</div>
+      <div id="signalLabel" class="small">Menunggu analisa</div>
     </div>
 
     <div class="tile">
@@ -505,6 +517,19 @@ class="section active-section">
   <div class="status-title">📊 Volume</div>
   <div id="volumeDetail" class="status-value">--</div>
   <div id="volumeMetrics" class="small" style="margin-top:6px">--</div>
+</div>
+
+<div class="status-box">
+  <div class="status-title">🛡️ Risk</div>
+  <div id="riskDetail" class="status-value">--</div>
+  <div id="riskMetrics" class="small" style="margin-top:6px">--</div>
+</div>
+
+<div class="status-box">
+  <div class="status-title">🎯 Kapan Buy / Sell</div>
+  <div id="signalDetail" class="status-value">--</div>
+  <div id="signalReason" class="small" style="margin-top:6px">--</div>
+  <div id="signalLevels" class="small" style="margin-top:8px;line-height:1.6">--</div>
 </div>
 
 </div>
@@ -656,10 +681,10 @@ class="section">
       🛡️ Risk
     </div>
     <div class="small">
-      Filter risiko
+      Aktif • ATR14, drawdown, range harian
     </div>
   </div>
-  <b>10%</b>
+  <b class="green">10%</b>
 </div>
 
 <div class="note">
@@ -835,6 +860,12 @@ function renderRadar(raw){
   const volume =
   data.volume || {};
 
+  const risk =
+  data.risk || {};
+
+  const signal =
+  data.signal || {};
+
   const metrics =
   broker.metrics || {};
 
@@ -843,6 +874,9 @@ function renderRadar(raw){
 
   const volumeMetrics =
   volume.metrics || {};
+
+  const riskMetrics =
+  risk.metrics || {};
 
 
   const radarScore =
@@ -859,6 +893,9 @@ function renderRadar(raw){
 
   const volumeScore =
   volume.score == null ? null : Number(volume.score);
+
+  const riskScore =
+  risk.score == null ? null : Number(risk.score);
 
 
   document
@@ -920,6 +957,30 @@ function renderRadar(raw){
   .getElementById('volumeLabel')
   .textContent =
   volume.label || 'Belum tersedia';
+
+  document
+  .getElementById('riskScore')
+  .textContent =
+  riskScore == null ? '--' : riskScore.toFixed(1);
+
+  document
+  .getElementById('riskLabel')
+  .textContent =
+  risk.label || 'Belum tersedia';
+
+  const signalAction = signal.action || 'WAIT';
+  const signalEl = document.getElementById('signalAction');
+  signalEl.textContent = signalAction;
+
+  let signalColor = 'yellow';
+  if(signalAction === 'BUY') signalColor = 'green';
+  if(signalAction === 'SELL') signalColor = 'red';
+  signalEl.className = 'tile-value ' + signalColor;
+
+  document
+  .getElementById('signalLabel')
+  .textContent =
+  signal.label || 'Tunggu analisa';
 
 
   const brokerPressure =
@@ -1011,11 +1072,48 @@ netEl.className =
   : 'Vol ' + Number(volumeMetrics.volume_ratio || 0).toFixed(2) + 'x avg20' +
     ' • Harga 1D ' + percent(volumeMetrics.price_change_1d);
 
+  document
+  .getElementById('riskDetail')
+  .textContent =
+  riskScore == null
+  ? 'Belum tersedia'
+  : riskScore.toFixed(1) + ' • ' + (risk.label || '');
+
+  document
+  .getElementById('riskMetrics')
+  .textContent =
+  riskScore == null
+  ? 'Data risk belum cukup'
+  : 'ATR14 ' + percent(riskMetrics.atr_pct) +
+    ' • Drawdown20 ' + percent(riskMetrics.drawdown_20d) +
+    ' • Range ' + percent(riskMetrics.day_range_pct);
+
+  document
+  .getElementById('signalDetail')
+  .textContent =
+  (signal.action || 'WAIT') + ' • ' + (signal.label || 'Tunggu Konfirmasi') +
+  ' • Confidence ' + Number(signal.confidence || 0).toFixed(1);
+
+  document
+  .getElementById('signalReason')
+  .textContent =
+  signal.reason || 'Belum ada alasan sinyal.';
+
+  const levels = signal.levels || {};
+  document
+  .getElementById('signalLevels')
+  .innerHTML =
+  'Buy pullback: <b>' + compactNumber(levels.buy_pullback_low) + ' - ' + compactNumber(levels.buy_pullback_high) + '</b><br>' +
+  'Buy breakout: <b>di atas ' + compactNumber(levels.buy_breakout_above) + '</b><br>' +
+  'Invalidasi / cut loss: <b>' + compactNumber(levels.invalidation) + '</b><br>' +
+  'TP referensi: <b>' + compactNumber(levels.tp1_reference) + ' / ' + compactNumber(levels.tp2_reference) + '</b>';
+
   const notes = [];
 
   (broker.notes || []).forEach(n => notes.push('🏦 ' + n));
   (trend.notes || []).forEach(n => notes.push('📈 ' + n));
   (volume.notes || []).forEach(n => notes.push('📊 ' + n));
+  (risk.notes || []).forEach(n => notes.push('🛡️ ' + n));
 
   document
   .getElementById('notes')
@@ -1247,10 +1345,19 @@ localStorage.getItem(
   document.getElementById('trendLabel').textContent = 'Menunggu OHLCV';
   document.getElementById('volumeScore').textContent = '--';
   document.getElementById('volumeLabel').textContent = 'Menunggu OHLCV';
+  document.getElementById('riskScore').textContent = '--';
+  document.getElementById('riskLabel').textContent = 'Menunggu OHLCV';
+  document.getElementById('signalAction').textContent = '--';
+  document.getElementById('signalLabel').textContent = 'Menunggu analisa';
   document.getElementById('trendDetail').textContent = '--';
   document.getElementById('trendMetrics').textContent = '--';
   document.getElementById('volumeDetail').textContent = '--';
   document.getElementById('volumeMetrics').textContent = '--';
+  document.getElementById('riskDetail').textContent = '--';
+  document.getElementById('riskMetrics').textContent = '--';
+  document.getElementById('signalDetail').textContent = '--';
+  document.getElementById('signalReason').textContent = '--';
+  document.getElementById('signalLevels').textContent = '--';
   document.getElementById('netFlow').textContent = '--';
   document.getElementById('activeBrokers').textContent = '--';
   document.getElementById('geniusConclusion').textContent =

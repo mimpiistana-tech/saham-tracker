@@ -1007,7 +1007,13 @@ async function loadRadar(){
 
     const data =
     await response.json();
-
+    localStorage.setItem(
+  'stockradar_last_data',
+  JSON.stringify({
+    savedAt: Date.now(),
+    data: data
+  })
+);
 
     renderRadar(data);
 
@@ -1026,7 +1032,45 @@ async function loadRadar(){
 
 
 
+function loadCachedRadar(){
 
+  try{
+
+    const saved =
+    localStorage.getItem(
+      'stockradar_last_data'
+    );
+
+    if(!saved){
+      document
+      .getElementById('apiStatus')
+      .textContent = '● Ready';
+
+      return;
+    }
+
+    const cached =
+    JSON.parse(saved);
+
+    renderRadar(cached.data);
+
+    document
+    .getElementById('apiStatus')
+    .textContent = '● Cached';
+
+  }
+  catch(error){
+
+    console.error(
+      'Cache error:',
+      error
+    );
+
+  }
+
+}
+
+loadCachedRadar();
 </script>
 
 </body>

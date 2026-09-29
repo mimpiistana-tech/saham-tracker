@@ -54,10 +54,10 @@ def broker():
             return result, cached["status"]
 
         else:
-        stale_cached = cached
+            stale_cached = cached
 
-    try:
-        response = requests.get(
+        try:
+            response = requests.get(
             f"{BASE_URL}/stocks/broker-summary",
             headers={
                 "Authorization": f"Bearer {API_KEY}",

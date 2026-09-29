@@ -1,4 +1,4 @@
-"""StockRadar Genius - Radar Score Engine V2."""
+"""StockRadar Genius - Radar Score Engine V3."""
 
 from dataclasses import dataclass, asdict
 from math import isfinite
@@ -133,18 +133,6 @@ def broker_label(score):
 
 
 def score_broker_flow(rows):
-    """
-    StockRadar Genius Broker Engine V2.
-
-    V2 membaca:
-    - konsentrasi Top 3 buyer vs Top 3 seller
-    - jumlah broker buyer vs seller
-    - dominasi broker terbesar
-
-    Total net seluruh broker tidak dipakai sebagai sinyal utama karena
-    secara alami jumlah buy dan sell market saling mengimbangi.
-    """
-
     normalized = []
 
     for row in rows:
@@ -158,16 +146,8 @@ def score_broker_flow(rows):
     positive = [x for x in normalized if x.net > 0]
     negative = [x for x in normalized if x.net < 0]
 
-    positive_sorted = sorted(
-        positive,
-        key=lambda x: x.net,
-        reverse=True,
-    )
-
-    negative_sorted = sorted(
-        negative,
-        key=lambda x: x.net,
-    )
+    positive_sorted = sorted(positive, key=lambda x: x.net, reverse=True)
+    negative_sorted = sorted(negative, key=lambda x: x.net)
 
     positive_net = sum(x.net for x in positive)
     negative_net_abs = sum(abs(x.net) for x in negative)
@@ -179,7 +159,6 @@ def score_broker_flow(rows):
             positive_sorted[0].net / positive_net
             if positive_sorted else 0.0
         )
-
         buyer_top3_share = (
             sum(x.net for x in positive_sorted[:3]) / positive_net
         )
@@ -192,7 +171,6 @@ def score_broker_flow(rows):
             abs(negative_sorted[0].net) / negative_net_abs
             if negative_sorted else 0.0
         )
-
         seller_top3_share = (
             sum(abs(x.net) for x in negative_sorted[:3])
             / negative_net_abs
@@ -226,21 +204,15 @@ def score_broker_flow(rows):
             "Buyer broker terlihat lebih terkonsentrasi; indikasi akumulasi perlu dipantau."
         )
     elif score >= 58:
-        notes.append(
-            "Tekanan broker condong ke sisi akumulasi."
-        )
+        notes.append("Tekanan broker condong ke sisi akumulasi.")
     elif score <= 30:
         notes.append(
             "Seller broker terlihat lebih terkonsentrasi; indikasi distribusi perlu diwaspadai."
         )
     elif score <= 42:
-        notes.append(
-            "Tekanan broker condong ke sisi distribusi."
-        )
+        notes.append("Tekanan broker condong ke sisi distribusi.")
     else:
-        notes.append(
-            "Struktur broker masih relatif seimbang."
-        )
+        notes.append("Struktur broker masih relatif seimbang.")
 
     if active < 10:
         notes.append(
@@ -248,14 +220,10 @@ def score_broker_flow(rows):
         )
 
     if buyer_top3_share >= 0.50:
-        notes.append(
-            "Top 3 buyer memegang porsi besar dari total net buy."
-        )
+        notes.append("Top 3 buyer memegang porsi besar dari total net buy.")
 
     if seller_top3_share >= 0.50:
-        notes.append(
-            "Top 3 seller memegang porsi besar dari total net sell."
-        )
+        notes.append("Top 3 seller memegang porsi besar dari total net sell.")
 
     return {
         "score": round(score, 1),
@@ -274,14 +242,225 @@ def score_broker_flow(rows):
             "buyer_top3_share": round(buyer_top3_share, 4),
             "seller_top3_share": round(seller_top3_share, 4),
         },
-        "top_buyers": [
-            asdict(x)
-            for x in positive_sorted[:5]
-        ],
-        "top_sellers": [
-            asdict(x)
-            for x in negative_sorted[:5]
-        ],
+        "top_buyers": [asdict(x) for x in positive_sorted[:5]],
+        "top_sellers": [asdict(x) for x in negative_sorted[:5]],
+        "notes": notes,
+    }
+
+
+def _clean_ohlcv_rows(rows):
+    cleaned = []
+
+    for row in rows or []:
+        if not isinstance(row, dict):
+            continue
+
+        close = parse_number(row.get("close"))
+        volume = parse_number(row.get("volume"))
+
+        if close <= 0:
+            continue
+
+        cleaned.append({
+            "date": str(row.get("date") or ""),
+            "open": parse_number(row.get("open")),
+            "high": parse_number(row.get("high")),
+            "low": parse_number(row.get("low")),
+            "close": close,
+            "volume": max(0.0, volume),
+        })
+
+    cleaned.sort(key=lambda x: x["date"])
+    return cleaned
+
+
+def _mean(values):
+    values = list(values)
+    return sum(values) / len(values) if values else 0.0
+
+
+def trend_label(score):
+    if score >= 75:
+        return "Uptrend Kuat"
+    if score >= 60:
+        return "Uptrend"
+    if score >= 45:
+        return "Netral"
+    if score >= 30:
+        return "Downtrend"
+    return "Downtrend Kuat"
+
+
+def score_trend_ohlcv(rows):
+    data = _clean_ohlcv_rows(rows)
+    closes = [x["close"] for x in data]
+    n = len(closes)
+
+    if n < 20:
+        return {
+            "available": False,
+            "score": None,
+            "label": "Data trend belum cukup",
+            "metrics": {"bars": n},
+            "notes": ["Butuh minimal 20 hari bursa untuk membaca trend."],
+        }
+
+    latest = closes[-1]
+    ma20 = _mean(closes[-20:])
+    ma50 = _mean(closes[-50:]) if n >= 50 else None
+
+    momentum20 = (
+        latest / closes[-20] - 1.0
+        if closes[-20] else 0.0
+    )
+
+    momentum5 = (
+        latest / closes[-5] - 1.0
+        if n >= 5 and closes[-5] else 0.0
+    )
+
+    score = 50.0
+    score += 8.0 if latest >= ma20 else -8.0
+    score += max(-15.0, min(15.0, (momentum20 / 0.15) * 15.0))
+    score += max(-7.0, min(7.0, (momentum5 / 0.07) * 7.0))
+
+    if ma50 is not None:
+        score += 8.0 if latest >= ma50 else -8.0
+        score += 10.0 if ma20 >= ma50 else -10.0
+
+    score = clamp(score)
+
+    notes = []
+
+    if latest > ma20:
+        notes.append("Harga berada di atas MA20.")
+    else:
+        notes.append("Harga berada di bawah MA20.")
+
+    if ma50 is not None:
+        if ma20 > ma50:
+            notes.append("MA20 berada di atas MA50; struktur menengah positif.")
+        else:
+            notes.append("MA20 berada di bawah MA50; struktur menengah masih lemah.")
+    else:
+        notes.append("MA50 belum tersedia penuh; trend menengah memakai data terbatas.")
+
+    if momentum20 > 0.05:
+        notes.append("Momentum 20 hari positif.")
+    elif momentum20 < -0.05:
+        notes.append("Momentum 20 hari negatif.")
+
+    return {
+        "available": True,
+        "score": round(score, 1),
+        "label": trend_label(score),
+        "metrics": {
+            "bars": n,
+            "latest_close": latest,
+            "ma20": round(ma20, 2),
+            "ma50": round(ma50, 2) if ma50 is not None else None,
+            "momentum_20d": round(momentum20, 4),
+            "momentum_5d": round(momentum5, 4),
+        },
+        "notes": notes,
+    }
+
+
+def volume_label(score):
+    if score >= 75:
+        return "Konfirmasi Kuat"
+    if score >= 60:
+        return "Mendukung"
+    if score >= 45:
+        return "Normal"
+    if score >= 30:
+        return "Lemah"
+    return "Distribusi Volume"
+
+
+def score_volume_ohlcv(rows):
+    data = _clean_ohlcv_rows(rows)
+    n = len(data)
+
+    if n < 10:
+        return {
+            "available": False,
+            "score": None,
+            "label": "Data volume belum cukup",
+            "metrics": {"bars": n},
+            "notes": ["Butuh minimal 10 hari bursa untuk membaca volume."],
+        }
+
+    latest = data[-1]
+    previous = data[-2]
+
+    baseline_rows = data[-21:-1] if n >= 21 else data[:-1]
+    avg_volume = _mean(x["volume"] for x in baseline_rows)
+
+    volume_ratio = (
+        latest["volume"] / avg_volume
+        if avg_volume > 0 else 1.0
+    )
+
+    price_change = (
+        latest["close"] / previous["close"] - 1.0
+        if previous["close"] else 0.0
+    )
+
+    five_rows = data[-5:]
+    avg5 = _mean(x["volume"] for x in five_rows)
+
+    score = 50.0
+
+    if volume_ratio >= 1.0:
+        volume_impact = min(30.0, (volume_ratio - 1.0) * 30.0)
+
+        if price_change > 0.002:
+            score += volume_impact
+        elif price_change < -0.002:
+            score -= volume_impact
+    else:
+        score -= min(8.0, (1.0 - volume_ratio) * 10.0)
+
+    five_price_change = (
+        five_rows[-1]["close"] / five_rows[0]["close"] - 1.0
+        if len(five_rows) >= 2 and five_rows[0]["close"] else 0.0
+    )
+
+    if avg_volume > 0 and avg5 > avg_volume * 1.15:
+        if five_price_change > 0:
+            score += 8.0
+        elif five_price_change < 0:
+            score -= 8.0
+
+    score = clamp(score)
+
+    notes = []
+
+    if volume_ratio >= 1.5 and price_change > 0:
+        notes.append("Volume melonjak saat harga menguat; konfirmasi positif.")
+    elif volume_ratio >= 1.5 and price_change < 0:
+        notes.append("Volume melonjak saat harga melemah; waspadai distribusi.")
+    elif volume_ratio >= 1.1:
+        notes.append("Volume di atas rata-rata 20 hari.")
+    elif volume_ratio < 0.8:
+        notes.append("Volume di bawah rata-rata; dorongan harga belum kuat.")
+    else:
+        notes.append("Volume berada di sekitar rata-rata.")
+
+    return {
+        "available": True,
+        "score": round(score, 1),
+        "label": volume_label(score),
+        "metrics": {
+            "bars": n,
+            "latest_volume": latest["volume"],
+            "avg_volume_20": round(avg_volume, 2),
+            "volume_ratio": round(volume_ratio, 4),
+            "price_change_1d": round(price_change, 4),
+            "avg_volume_5": round(avg5, 2),
+            "price_change_5d": round(five_price_change, 4),
+        },
         "notes": notes,
     }
 
@@ -336,9 +515,7 @@ def build_radar_score(components):
         "label": overall_label(overall, coverage),
         "components": available,
         "missing_components": [
-            x
-            for x in COMPONENT_WEIGHTS
-            if x not in available
+            x for x in COMPONENT_WEIGHTS if x not in available
         ],
         "weights": COMPONENT_WEIGHTS.copy(),
         "is_full_score": coverage >= 100,
@@ -355,4 +532,29 @@ def score_from_broker_rows(rows):
     return {
         "radar": radar,
         "broker": broker,
+    }
+
+
+def score_from_market_data(broker_rows, ohlcv_rows):
+    broker = score_broker_flow(broker_rows)
+    trend = score_trend_ohlcv(ohlcv_rows)
+    volume = score_volume_ohlcv(ohlcv_rows)
+
+    components = {
+        "broker": broker["score"],
+    }
+
+    if trend.get("available"):
+        components["trend"] = trend["score"]
+
+    if volume.get("available"):
+        components["volume"] = volume["score"]
+
+    radar = build_radar_score(components)
+
+    return {
+        "radar": radar,
+        "broker": broker,
+        "trend": trend,
+        "volume": volume,
     }

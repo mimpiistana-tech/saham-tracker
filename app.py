@@ -56,7 +56,7 @@ def broker():
         else:
             stale_cached = cached
 
-        try:
+    try:
             response = requests.get(
             f"{BASE_URL}/stocks/broker-summary",
             headers={

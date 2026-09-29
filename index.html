@@ -330,7 +330,7 @@ td{
 <header>
   <div>
     <div class="logo">📈 Stock<span>Radar</span></div>
-    <div class="muted">Genius Engine V1</div>
+    <div class="muted">Genius Engine V2 • Broker + Trend + Volume</div>
   </div>
 
   <div id="apiStatus" class="online">
@@ -380,9 +380,21 @@ td{
     </div>
 
     <div class="tile">
+      <div class="tile-title">📈 TREND SCORE</div>
+      <div id="trendScore" class="tile-value green">--</div>
+      <div id="trendLabel" class="small">Menunggu OHLCV</div>
+    </div>
+
+    <div class="tile">
+      <div class="tile-title">📊 VOLUME SCORE</div>
+      <div id="volumeScore" class="tile-value blue">--</div>
+      <div id="volumeLabel" class="small">Menunggu OHLCV</div>
+    </div>
+
+    <div class="tile">
       <div class="tile-title">📊 BROKER PRESSURE</div>
-<div id="netFlow" class="tile-value green">--</div>
-<div class="small">Tekanan akumulasi / distribusi</div>
+      <div id="netFlow" class="tile-value green">--</div>
+      <div class="small">Tekanan akumulasi / distribusi</div>
     </div>
 
     <div class="tile">
@@ -481,6 +493,18 @@ class="section active-section">
        class="status-value">
        --
   </div>
+</div>
+
+<div class="status-box">
+  <div class="status-title">📈 Trend</div>
+  <div id="trendDetail" class="status-value">--</div>
+  <div id="trendMetrics" class="small" style="margin-top:6px">--</div>
+</div>
+
+<div class="status-box">
+  <div class="status-title">📊 Volume</div>
+  <div id="volumeDetail" class="status-value">--</div>
+  <div id="volumeMetrics" class="small" style="margin-top:6px">--</div>
 </div>
 
 </div>
@@ -596,10 +620,10 @@ class="section">
       📈 Trend
     </div>
     <div class="small">
-      Tahap berikutnya
+      Aktif • MA20, MA50, momentum
     </div>
   </div>
-  <b>20%</b>
+  <b class="green">20%</b>
 </div>
 
 <div class="row">
@@ -608,10 +632,10 @@ class="section">
       📊 Volume
     </div>
     <div class="small">
-      Tahap berikutnya
+      Aktif • rasio volume & price confirmation
     </div>
   </div>
-  <b>20%</b>
+  <b class="green">20%</b>
 </div>
 
 <div class="row">
@@ -805,8 +829,20 @@ function renderRadar(raw){
   const broker =
   data.broker || {};
 
+  const trend =
+  data.trend || {};
+
+  const volume =
+  data.volume || {};
+
   const metrics =
   broker.metrics || {};
+
+  const trendMetrics =
+  trend.metrics || {};
+
+  const volumeMetrics =
+  volume.metrics || {};
 
 
   const radarScore =
@@ -817,6 +853,12 @@ function renderRadar(raw){
 
   const brokerScore =
   Number(broker.score ?? 0);
+
+  const trendScore =
+  trend.score == null ? null : Number(trend.score);
+
+  const volumeScore =
+  volume.score == null ? null : Number(volume.score);
 
 
   document
@@ -858,6 +900,26 @@ function renderRadar(raw){
   .getElementById('coverage')
   .textContent =
   coverage.toFixed(1)+'%';
+
+  document
+  .getElementById('trendScore')
+  .textContent =
+  trendScore == null ? '--' : trendScore.toFixed(1);
+
+  document
+  .getElementById('trendLabel')
+  .textContent =
+  trend.label || 'Belum tersedia';
+
+  document
+  .getElementById('volumeScore')
+  .textContent =
+  volumeScore == null ? '--' : volumeScore.toFixed(1);
+
+  document
+  .getElementById('volumeLabel')
+  .textContent =
+  volume.label || 'Belum tersedia';
 
 
   const brokerPressure =
@@ -917,9 +979,43 @@ netEl.className =
   .textContent =
   percent(metrics.top_buyer_share);
 
+  document
+  .getElementById('trendDetail')
+  .textContent =
+  trendScore == null
+  ? 'Belum tersedia'
+  : trendScore.toFixed(1) + ' • ' + (trend.label || '');
 
-  const notes =
-  broker.notes || [];
+  document
+  .getElementById('trendMetrics')
+  .textContent =
+  trendScore == null
+  ? 'Data OHLCV belum cukup'
+  : 'Close ' + compactNumber(trendMetrics.latest_close) +
+    ' • MA20 ' + compactNumber(trendMetrics.ma20) +
+    (trendMetrics.ma50 == null ? '' : ' • MA50 ' + compactNumber(trendMetrics.ma50)) +
+    ' • Mom20 ' + percent(trendMetrics.momentum_20d);
+
+  document
+  .getElementById('volumeDetail')
+  .textContent =
+  volumeScore == null
+  ? 'Belum tersedia'
+  : volumeScore.toFixed(1) + ' • ' + (volume.label || '');
+
+  document
+  .getElementById('volumeMetrics')
+  .textContent =
+  volumeScore == null
+  ? 'Data volume belum cukup'
+  : 'Vol ' + Number(volumeMetrics.volume_ratio || 0).toFixed(2) + 'x avg20' +
+    ' • Harga 1D ' + percent(volumeMetrics.price_change_1d);
+
+  const notes = [];
+
+  (broker.notes || []).forEach(n => notes.push('🏦 ' + n));
+  (trend.notes || []).forEach(n => notes.push('📈 ' + n));
+  (volume.notes || []).forEach(n => notes.push('📊 ' + n));
 
   document
   .getElementById('notes')
@@ -1147,6 +1243,14 @@ localStorage.getItem(
   document.getElementById('radarScore').textContent = '--';
   document.getElementById('brokerScore').textContent = '--';
   document.getElementById('coverage').textContent = '--%';
+  document.getElementById('trendScore').textContent = '--';
+  document.getElementById('trendLabel').textContent = 'Menunggu OHLCV';
+  document.getElementById('volumeScore').textContent = '--';
+  document.getElementById('volumeLabel').textContent = 'Menunggu OHLCV';
+  document.getElementById('trendDetail').textContent = '--';
+  document.getElementById('trendMetrics').textContent = '--';
+  document.getElementById('volumeDetail').textContent = '--';
+  document.getElementById('volumeMetrics').textContent = '--';
   document.getElementById('netFlow').textContent = '--';
   document.getElementById('activeBrokers').textContent = '--';
   document.getElementById('geniusConclusion').textContent =

@@ -42,6 +42,7 @@ def broker():
     cache_key = f"{ticker}_{date_from}_{date_to}"
 
     # Cek apakah data sudah pernah diambil
+    stale_cached = None
     if cache_key in CACHE:
         cached = CACHE[cache_key]
 
@@ -53,7 +54,7 @@ def broker():
             return result, cached["status"]
 
         else:
-            del CACHE[cache_key]
+        stale_cached = cached
 
     try:
         response = requests.get(
@@ -81,6 +82,11 @@ def broker():
                 "data": data,
                 "status": response.status_code
             }
+                if response.status_code != 200 and stale_cached is not None:
+            result = jsonify(stale_cached["data"])
+            result.headers["X-StockRadar-Cache"] = "STALE"
+            result.headers["X-StockRadar-Upstream-Status"] = str(response.status_code)
+            return result, stale_cached["status"]
 
         result = jsonify(data)
         result.headers["X-StockRadar-Cache"] = "MISS"
@@ -92,6 +98,7 @@ def broker():
             "success": False,
             "error": str(e)
         }), 500
+
 def extract_broker_rows(payload):
     rows = []
 

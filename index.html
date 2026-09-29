@@ -795,14 +795,16 @@ berapa persen mesin yang sudah aktif.
 
 <div class="nav-inner">
 
-<div class="nav-item active">
+<div class="nav-item active"
+onclick="openBottomNav('overview',this)">
 <span class="nav-icon">🧠</span>
 Genius
 </div>
 
-<div class="nav-item">
-<span class="nav-icon">📈</span>
-Radar
+<div class="nav-item"
+onclick="openBottomNav('scanner',this)">
+<span class="nav-icon">📡</span>
+Scanner
 </div>
 
 <div class="nav-item">
@@ -821,6 +823,27 @@ Watchlist
 
 
 <script>
+
+function openBottomNav(id,btn){
+  document
+  .querySelectorAll('.section')
+  .forEach(x=>x.classList.remove('active-section'));
+
+  document
+  .getElementById(id)
+  .classList.add('active-section');
+
+  document
+  .querySelectorAll('.nav-item')
+  .forEach(x=>x.classList.remove('active'));
+
+  btn.classList.add('active');
+
+  window.scrollTo({
+    top: document.getElementById(id).offsetTop - 20,
+    behavior:'smooth'
+  });
+}
 
 function openTab(id,btn){
 

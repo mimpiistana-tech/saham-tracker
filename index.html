@@ -392,7 +392,14 @@ td{
     </div>
 
   </div>
-
+ <input
+  id="tickerInput"
+  type="text"
+  maxlength="4"
+  placeholder="Kode saham, contoh: BBRI"
+  value="BBRI"
+  autocomplete="off"
+/>
   <button id="refreshBtn" class="refresh" onclick="loadRadar()">
     🔄 Refresh Radar
   </button>
@@ -969,6 +976,17 @@ function showError(message){
 async function loadRadar(){
 const refreshBtn =
 document.getElementById('refreshBtn');
+const ticker =
+document
+.getElementById('tickerInput')
+.value
+.trim()
+.toUpperCase();
+
+if(!ticker){
+  alert('Masukkan kode saham dulu.');
+  return;
+  }
 
 const now = Date.now();
 
@@ -1020,7 +1038,9 @@ if(refreshBtn){
 
     let response =
     await fetch(
-      '/api/radar?ticker=BBRI&from=2026-09-28&to=2026-09-28',
+      '/api/radar?ticker=' +
+encodeURIComponent(ticker) +
+'&from=2026-09-28&to=2026-09-28',
       {
         cache:'no-store'
       }

@@ -393,7 +393,7 @@ td{
 
   </div>
 
-  <button class="refresh" onclick="loadRadar()">
+  <button id="refreshBtn" class="refresh" onclick="loadRadar()">
     🔄 Refresh Radar
   </button>
 
@@ -967,7 +967,47 @@ function showError(message){
 
 
 async function loadRadar(){
+const refreshBtn =
+document.getElementById('refreshBtn');
 
+const now = Date.now();
+
+const lastRefresh =
+Number(
+  localStorage.getItem(
+    'stockradar_last_refresh'
+  ) || 0
+);
+
+const cooldown = 60000;
+
+if(now - lastRefresh < cooldown){
+
+  const sisa =
+  Math.ceil(
+    (cooldown - (now - lastRefresh))
+    / 1000
+  );
+
+  alert(
+    'Tunggu ' +
+    sisa +
+    ' detik sebelum refresh lagi.'
+  );
+
+  return;
+}
+
+localStorage.setItem(
+  'stockradar_last_refresh',
+  String(now)
+);
+
+if(refreshBtn){
+  refreshBtn.disabled = true;
+  refreshBtn.textContent =
+  '⏳ Mengambil data...';
+  }
   const status =
   document
   .getElementById('apiStatus');
@@ -1027,6 +1067,17 @@ async function loadRadar(){
 );
 
   }
+  if(refreshBtn){
+
+  setTimeout(() => {
+
+    refreshBtn.disabled = false;
+    refreshBtn.textContent =
+    '🔄 Refresh Radar';
+
+  }, 60000);
+
+    }
 
 }
 

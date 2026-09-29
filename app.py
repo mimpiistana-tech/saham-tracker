@@ -21,12 +21,32 @@ CACHE = {}
 CACHE_TTL = 60 * 60 * 24
 
 SCANNER_UNIVERSE = [
-    "BBCA", "BBRI", "BMRI", "BBNI", "BRIS",
-    "TLKM", "ASII", "GOTO", "AMMN", "BREN",
-    "TPIA", "BRPT", "ADRO", "PTBA", "ANTM",
-    "MDKA", "INCO", "PGAS", "UNTR", "ESSA",
-    "ICBP", "INDF", "KLBF", "CPIN", "JPFA",
-    "MAPI", "ERAA", "PANI", "NAYZ", "PIPA",
+    # Banks & financials
+    "BBCA", "BBRI", "BMRI", "BBNI", "BRIS", "ARTO", "BTPS", "BDMN", "NISP", "BTPN",
+    "BBTN", "PNBN", "PNLF", "ADMF", "BFIN",
+    # Telco, tech & digital
+    "TLKM", "ISAT", "EXCL", "GOTO", "BUKA", "EMTK", "MTEL", "TOWR", "TBIG", "DCII",
+    # Conglomerates & industrials
+    "ASII", "UNTR", "AUTO", "HEXA", "IMAS", "INDY", "AKRA", "SMGR", "INTP", "WTON",
+    # Energy, coal, oil & gas
+    "ADRO", "ADMR", "PTBA", "ITMG", "HRUM", "BUMI", "BYAN", "PGAS", "MEDC", "ENRG",
+    "ESSA", "RAJA", "ELSA", "TOBA", "SMMT",
+    # Metals, mining & materials
+    "ANTM", "INCO", "MDKA", "MBMA", "AMMN", "NCKL", "TINS", "BRMS", "ARCI", "PSAB",
+    # Petrochemicals & basic materials
+    "TPIA", "BRPT", "ESSA", "FPNI", "AGII", "AVIA", "INKP", "TKIM", "SMGR", "INTP",
+    # Consumer staples & discretionary
+    "ICBP", "INDF", "MYOR", "UNVR", "KLBF", "SIDO", "ULTJ", "CMRY", "GOOD", "ROTI",
+    "CPIN", "JPFA", "MAIN", "MAPA", "MAPI", "ERAA", "ACES", "LPPF", "RALS", "MIDI",
+    # Property & infrastructure
+    "PANI", "PWON", "BSDE", "CTRA", "SMRA", "DMAS", "KIJA", "APLN", "TOTL", "ADHI",
+    "WIKA", "PTPP", "JSMR", "CMNP", "META",
+    # Healthcare
+    "MIKA", "HEAL", "SILO", "PRDA", "TSPC", "KAEF", "INAF",
+    # Transport & logistics
+    "GIAA", "ASSA", "WEHA", "TMAS", "SMDR", "WINS", "HATM",
+    # Media, tourism, lifestyle & newer stories
+    "SCMA", "MNCN", "BMTR", "FILM", "RAAM", "RANS", "NAYZ", "PIPA", "RICY", "MEJA",
 ]
 
 
@@ -393,6 +413,29 @@ def scan_one_ticker(ticker, date_to):
     if len(rows) < 20:
         return None
 
+    recent20 = rows[-20:]
+
+    active_days = sum(
+        1 for row in recent20
+        if float(row.get("volume") or 0) > 0
+    )
+
+    trading_values = [
+        float(row.get("close") or 0) * float(row.get("volume") or 0)
+        for row in recent20
+        if float(row.get("close") or 0) > 0
+        and float(row.get("volume") or 0) > 0
+    ]
+
+    avg_value_20 = (
+        sum(trading_values) / len(trading_values)
+        if trading_values else 0.0
+    )
+
+    # Filter saham yang terlalu sepi agar scanner tidak mudah terjebak false signal.
+    if active_days < 15 or avg_value_20 < 2_000_000_000:
+        return None
+
     trend = score_trend_ohlcv(rows)
     volume = score_volume_ohlcv(rows)
     risk = score_risk_ohlcv(rows)
@@ -408,10 +451,19 @@ def scan_one_ticker(ticker, date_to):
     volume_score = float(volume["score"])
     risk_score = float(risk["score"])
 
+    liquidity_bonus = min(
+        8.0,
+        max(
+            0.0,
+            (avg_value_20 / 25_000_000_000) * 8.0,
+        ),
+    )
+
     scanner_score = (
-        0.45 * trend_score
-        + 0.35 * volume_score
+        0.42 * trend_score
+        + 0.30 * volume_score
         + 0.20 * risk_score
+        + liquidity_bonus
     )
 
     trend_metrics = trend.get("metrics", {})
@@ -457,6 +509,8 @@ def scan_one_ticker(ticker, date_to):
         "momentum_20d": trend_metrics.get("momentum_20d"),
         "volume_ratio": volume_metrics.get("volume_ratio"),
         "atr_pct": risk_metrics.get("atr_pct"),
+        "avg_value_20": round(avg_value_20, 2),
+        "active_days_20": active_days,
         "cache": cache_state,
     }
 
@@ -505,7 +559,7 @@ def scanner():
         reverse=True,
     )
 
-    top = results[:10]
+    top = results[:15]
 
     return jsonify({
         "success": True,
@@ -513,7 +567,8 @@ def scanner():
         "source": "Yahoo Finance OHLCV",
         "universe_size": len(SCANNER_UNIVERSE),
         "scanned": len(results),
-        "note": "Scanner awal tidak memakai broker summary agar hemat kuota IndexAlpha. Pilih kandidat lalu jalankan analisa full untuk konfirmasi broker.",
+        "liquidity_filter": "avg value 20D >= Rp2B dan minimal 15 hari aktif",
+        "note": "Scanner luas tidak memakai broker summary agar hemat kuota IndexAlpha. Pilih kandidat lalu jalankan analisa full untuk konfirmasi broker.",
         "results": top,
     })
 

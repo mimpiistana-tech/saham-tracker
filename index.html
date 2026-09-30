@@ -5461,7 +5461,7 @@ async function analyzeCandidate(ticker){
     if(status){
       status.textContent =
       usedAnyCache
-      ? '🛡️ Cache • Shield'
+      ? '🛡️ CACHE SAFE'
       : '🛡️ Quota Shield';
 
       status.className =
@@ -5549,7 +5549,7 @@ if(shield.active){
     {
       maxAgeMs:24 * 60 * 60 * 1000,
       allowStale:false,
-      statusText:'● Cache • Quota Shield'
+      statusText:'🛡️ CACHE SAFE'
     }
   );
 
@@ -5726,7 +5726,7 @@ encodeURIComponent(date),
 
         if(status){
           status.textContent =
-          '🛡️ Cache • Shield';
+          '🛡️ CACHE SAFE';
 
           status.className =
           'online quota-shield';

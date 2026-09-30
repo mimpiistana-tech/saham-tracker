@@ -821,6 +821,14 @@ berapa persen mesin yang sudah aktif.
       Background monitor: belum dicek.
     </div>
 
+    <div id="backgroundHealth" class="note">
+      Last background check: belum ada.
+    </div>
+
+    <button class="refresh" style="margin-top:10px" onclick="runBackgroundCheckNow()">
+      🩺 Cek Background Sekarang
+    </button>
+
     <h2 style="margin-top:18px">📣 Riwayat Alert</h2>
     <div id="alertHistory">
       <div class="loading">Belum ada alert.</div>
@@ -972,6 +980,7 @@ function openAlerts(btn){
   renderAlerts();
   updateNotificationStatus();
   updateBackgroundStatus();
+  readBackgroundHealth();
   importBackgroundAlerts();
 
   window.scrollTo({
@@ -1100,6 +1109,129 @@ async function updateBackgroundStatus(){
   }
 }
 
+async function readBackgroundHealth(){
+  const target =
+  document.getElementById('backgroundHealth');
+
+  if(!target || !('indexedDB' in window)){
+    return;
+  }
+
+  try{
+    const db =
+    await new Promise((resolve,reject)=>{
+      const req =
+      indexedDB.open('stockradar_background',2);
+
+      req.onupgradeneeded = ()=>{
+        const db = req.result;
+
+        if(!db.objectStoreNames.contains('paper_trades')){
+          db.createObjectStore('paper_trades',{keyPath:'id'});
+        }
+
+        if(!db.objectStoreNames.contains('background_alerts')){
+          db.createObjectStore('background_alerts',{keyPath:'event_key'});
+        }
+
+        if(!db.objectStoreNames.contains('monitor_meta')){
+          db.createObjectStore('monitor_meta',{keyPath:'key'});
+        }
+      };
+
+      req.onsuccess = ()=>resolve(req.result);
+      req.onerror = ()=>reject(req.error);
+    });
+
+    const health =
+    await new Promise((resolve,reject)=>{
+      const tx =
+      db.transaction('monitor_meta','readonly');
+
+      const req =
+      tx.objectStore('monitor_meta').get('health');
+
+      req.onsuccess = ()=>resolve(req.result || null);
+      req.onerror = ()=>reject(req.error);
+    });
+
+    if(!health){
+      target.textContent =
+      'Last background check: belum ada.';
+      return;
+    }
+
+    const when =
+    health.last_finished_at
+    ? new Date(health.last_finished_at).toLocaleString('id-ID')
+    : 'sedang berjalan';
+
+    const state =
+    health.state || 'UNKNOWN';
+
+    target.textContent =
+    'Last background check: ' + when +
+    ' • Status ' + state +
+    ' • Trigger ' + (health.trigger || '-') +
+    ' • Checked ' + Number(health.checked || 0) +
+    ' • Fail ' + Number(health.failures || 0);
+  }catch(e){
+    target.textContent =
+    'Last background check: gagal membaca status.';
+  }
+}
+
+async function runBackgroundCheckNow(){
+  const target =
+  document.getElementById('backgroundHealth');
+
+  if(target){
+    target.textContent =
+    'Last background check: menjalankan tes...';
+  }
+
+  try{
+    if(!('serviceWorker' in navigator)){
+      if(target){
+        target.textContent =
+        'Background check gagal: service worker tidak tersedia.';
+      }
+      return;
+    }
+
+    const reg =
+    await navigator.serviceWorker.ready;
+
+    const sw =
+    reg.active ||
+    navigator.serviceWorker.controller;
+
+    if(!sw){
+      if(target){
+        target.textContent =
+        'Background check gagal: service worker belum aktif.';
+      }
+      return;
+    }
+
+    sw.postMessage({
+      type:'CHECK_PAPER_NOW'
+    });
+
+    await new Promise(resolve =>
+      setTimeout(resolve,2500)
+    );
+
+    await readBackgroundHealth();
+    await importBackgroundAlerts();
+  }catch(e){
+    if(target){
+      target.textContent =
+      'Background check gagal dijalankan.';
+    }
+  }
+}
+
 async function setupBackgroundMonitor(){
   if(!('serviceWorker' in navigator)){
     updateBackgroundStatus();
@@ -1136,6 +1268,7 @@ async function setupBackgroundMonitor(){
     }
 
     updateBackgroundStatus();
+    readBackgroundHealth();
   }catch(e){
     console.log('Service worker register failed',e);
     updateBackgroundStatus();

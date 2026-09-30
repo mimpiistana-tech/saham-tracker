@@ -1428,7 +1428,7 @@ async function runScanner(){
   }
 }
 
-function analyzeCandidate(ticker){
+async function analyzeCandidate(ticker){
   const input =
   document.getElementById('tickerInput');
 
@@ -1446,11 +1446,41 @@ function analyzeCandidate(ticker){
   .querySelectorAll('.tab')
   .forEach(x=>x.classList.remove('active'));
 
-  document
-  .querySelector('.tab')
-  .classList.add('active');
+  const geniusTab =
+  document.querySelector('.tab');
 
-  window.scrollTo({top:0,behavior:'smooth'});
+  if(geniusTab){
+    geniusTab.classList.add('active');
+  }
+
+  document
+  .querySelectorAll('.nav-item')
+  .forEach(x=>x.classList.remove('active'));
+
+  const geniusNav =
+  document.querySelector('.nav-item');
+
+  if(geniusNav){
+    geniusNav.classList.add('active');
+  }
+
+  const status =
+  document.getElementById('apiStatus');
+
+  if(status){
+    status.textContent = '● Full Analysis';
+  }
+
+  window.scrollTo({
+    top:0,
+    behavior:'smooth'
+  });
+
+  await new Promise(resolve =>
+    setTimeout(resolve, 250)
+  );
+
+  await loadRadar();
 }
 
 function showError(message){

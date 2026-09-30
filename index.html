@@ -813,6 +813,18 @@ berapa persen mesin yang sudah aktif.
   </div>
 
   <div class="card">
+    <h2>🧠 Auto Filter / Regime Gate</h2>
+    <div class="note">
+      Filter otomatis memakai kondisi IHSG dan hasil Market Regime Validation Model A.
+      ACTIVE boleh lanjut ke Execution Gate. LEARNING dan PAPER ONLY tetap boleh diuji di Paper Trade.
+      PAUSE tidak diprioritaskan sebagai kandidat utama.
+    </div>
+    <div id="regimeGateSummary" class="status-box">
+      <div class="loading">Belum ada scan hari ini.</div>
+    </div>
+  </div>
+
+  <div class="card">
     <h2>🏆 Hasil Scanner</h2>
     <div id="scannerResults">
       <div class="loading">Belum discan.</div>
@@ -6337,6 +6349,140 @@ netEl.className =
 }
 
 
+const REGIME_GATE_STORAGE_KEY = 'stockradar_regime_gate_v1';
+
+function loadRegimeGateState(){
+  try{
+    const raw=localStorage.getItem(REGIME_GATE_STORAGE_KEY);
+    return raw ? JSON.parse(raw) : null;
+  }catch(e){
+    return null;
+  }
+}
+
+function regimeGateMeta(level){
+  const map={
+    ACTIVE:{label:'🟢 ACTIVE',className:'green'},
+    LEARNING:{label:'🧪 LEARNING',className:'yellow'},
+    PAPER_ONLY:{label:'🟡 PAPER ONLY',className:'yellow'},
+    PAUSE:{label:'🔴 PAUSE',className:'red'}
+  };
+  return map[String(level||'LEARNING').toUpperCase()] || map.LEARNING;
+}
+
+function deriveRegimeGateLevel(regime,setup,stats={}){
+  const market=String(regime||'Unknown');
+  const setupName=String(setup||'');
+  const trades=Number(stats.trades||0);
+  const exp=stats.expectancy==null?null:Number(stats.expectancy);
+  const pf=stats.profit_factor==null?null:Number(stats.profit_factor);
+
+  if(market==='Sideways'||market==='Bearish'){
+    return {level:'PAPER_ONLY',reason:'IHSG '+market+': tetap diuji di Paper Trade.'};
+  }
+
+  if(market!=='Bullish'){
+    return {level:'LEARNING',reason:'Regime IHSG belum cukup jelas.'};
+  }
+
+  if(trades<15){
+    return {level:'LEARNING',reason:'Sampel '+trades+' trade; target minimal 15.'};
+  }
+
+  if(setupName==='Watch Pullback'){
+    if(exp!=null && exp>0 && (pf==null || pf>=1.20)){
+      return {level:'ACTIVE',reason:'Bullish + Watch Pullback punya expectancy positif.'};
+    }
+    if(exp!=null && exp<=0){
+      return {level:'PAUSE',reason:'Watch Pullback Bullish belum punya expectancy positif.'};
+    }
+    return {level:'LEARNING',reason:'Watch Pullback masih perlu data tambahan.'};
+  }
+
+  if(setupName==='Momentum'){
+    if((exp!=null&&exp<=0)||(pf!=null&&pf<1.0)){
+      return {level:'PAUSE',reason:'Momentum Bullish belum menunjukkan edge yang cukup.'};
+    }
+    return {level:'LEARNING',reason:'Momentum lanjut pengumpulan sampel.'};
+  }
+
+  return {level:'LEARNING',reason:'Setup ini masih tahap belajar.'};
+}
+
+function accumulateRegimeGateBatch(acc,data){
+  const splits=data?.models?.A?.regime_setup_summary||{};
+  Object.entries(splits).forEach(([regime,setups])=>{
+    Object.entries(setups||{}).forEach(([setup,stats])=>{
+      const trades=Number(stats?.trades||0);
+      if(trades<=0)return;
+      const key=regime+'|'+setup;
+      if(!acc[key]){
+        acc[key]={regime,setup,trades:0,cumulative_pnl:0,wins:0,losses:0,pf_sum:0,pf_weight:0};
+      }
+      const row=acc[key];
+      row.trades+=trades;
+      row.cumulative_pnl+=Number(stats?.cumulative_pnl||0);
+      row.wins+=Number(stats?.wins||0);
+      row.losses+=Number(stats?.losses||0);
+      if(stats?.profit_factor!=null){
+        row.pf_sum+=Number(stats.profit_factor)*trades;
+        row.pf_weight+=trades;
+      }
+    });
+  });
+}
+
+function finalizeRegimeGateState(acc,settings={}){
+  const rules={};
+  Object.entries(acc||{}).forEach(([key,row])=>{
+    const trades=Number(row.trades||0);
+    const stats={
+      trades,
+      expectancy:trades?Number((Number(row.cumulative_pnl||0)/trades).toFixed(4)):null,
+      win_rate:trades?Number((Number(row.wins||0)/trades*100).toFixed(2)):null,
+      profit_factor:row.pf_weight?Number((row.pf_sum/row.pf_weight).toFixed(4)):null
+    };
+    const d=deriveRegimeGateLevel(row.regime,row.setup,stats);
+    rules[key]={regime:row.regime,setup:row.setup,...stats,level:d.level,reason:d.reason};
+  });
+  const state={saved_at:Date.now(),validation_date:settings.date||'',sessions:Number(settings.sessions||0),max_signals:Number(settings.maxSignals||0),rules};
+  localStorage.setItem(REGIME_GATE_STORAGE_KEY,JSON.stringify(state));
+  return state;
+}
+
+function getCandidateRegimeGate(item,marketRegimeInfo={}){
+  const regime=String(marketRegimeInfo?.regime||item?.market_regime||'Unknown');
+  const setup=String(item?.setup||'');
+  const state=loadRegimeGateState();
+  const rule=state?.rules?.[regime+'|'+setup];
+  if(rule){
+    const m=regimeGateMeta(rule.level);
+    return {...rule,label:m.label,className:m.className,source:'validation'};
+  }
+  const d=deriveRegimeGateLevel(regime,setup,{trades:0});
+  const m=regimeGateMeta(d.level);
+  return {regime,setup,trades:0,expectancy:null,profit_factor:null,level:d.level,reason:d.reason,label:m.label,className:m.className,source:'fallback'};
+}
+
+function renderRegimeGateSummary(info,candidates=[]){
+  const target=document.getElementById('regimeGateSummary');
+  if(!target)return;
+  const regime=String(info?.regime||'Unknown');
+  const state=loadRegimeGateState();
+  const counts={ACTIVE:0,LEARNING:0,PAPER_ONLY:0,PAUSE:0};
+  (candidates||[]).forEach(x=>{
+    const k=String(x?.regime_gate_status||'LEARNING');
+    if(k in counts) counts[k]+=1;
+  });
+  target.innerHTML=
+    '<div class="status-title">REGIME IHSG</div>'+
+    '<div class="status-value">'+regime+' • '+(info?.date||'--')+'</div>'+
+    '<div class="small" style="margin-top:7px;line-height:1.7">'+
+    'ACTIVE '+counts.ACTIVE+' • LEARNING '+counts.LEARNING+' • PAPER ONLY '+counts.PAPER_ONLY+' • PAUSE '+counts.PAUSE+
+    '<br>'+(state?.saved_at?('Model gate tersimpan dari validation '+(state.validation_date||'--')):'Belum ada model gate tersimpan. Jalankan Market Regime Validation sekali.')+
+    '<br>Gate hanya memfilter proses StockRadar; bukan jaminan profit.</div>';
+}
+
 async function runMarketRegimeValidation(){
   const target =
   document.getElementById('regimeResults');
@@ -6520,6 +6666,7 @@ async function runMarketRegimeValidation(){
   const batchHtml = [];
   let successCount = 0;
   let failedCount = 0;
+  const gateAccumulator = {};
 
   for(let i=0;i<chunks.length;i++){
     const batchTickers =
@@ -6585,6 +6732,8 @@ async function runMarketRegimeValidation(){
 
       successCount += 1;
 
+      accumulateRegimeGateBatch(gateAccumulator,data);
+
       batchHtml.push(
         renderBatch(
           data,
@@ -6610,6 +6759,9 @@ async function runMarketRegimeValidation(){
     }
   }
 
+  const gateState=finalizeRegimeGateState(gateAccumulator,{date,sessions,maxSignals});
+  const gateRuleCount=Object.keys(gateState?.rules||{}).length;
+
   target.innerHTML =
   '<div class="note">' +
     'Market Regime selesai • Batch sukses ' +
@@ -6618,6 +6770,9 @@ async function runMarketRegimeValidation(){
     chunks.length +
     ' • Gagal ' +
     failedCount +
+    '<br>🧠 Auto Filter diperbarui: ' +
+    gateRuleCount +
+    ' kombinasi regime/setup tersimpan.' +
     '<br>Regime adalah label historis kondisi IHSG saat signal muncul, bukan prediksi pasar berikutnya.' +
   '</div>' +
   batchHtml.join('');

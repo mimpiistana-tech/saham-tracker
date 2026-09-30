@@ -874,6 +874,16 @@ berapa persen mesin yang sudah aktif.
     </div>
 
     <button class="refresh"
+      style="margin-top:10px"
+      onclick="startBadgeTest5s()">
+      ⏱️ Tes Badge 5 Detik
+    </button>
+
+    <div id="badgeTestStatus" class="note">
+      Tes badge: belum dijalankan.
+    </div>
+
+    <button class="refresh"
       style="margin-top:10px;background:#ff7180"
       onclick="clearSimulationAlerts()">
       🧹 Hapus Alert Simulasi
@@ -1801,6 +1811,52 @@ async function clearSimulationAlerts(){
     status.textContent =
     'Alert simulasi sudah dibersihkan ✅';
   }
+}
+
+function startBadgeTest5s(){
+  const status =
+  document.getElementById('badgeTestStatus');
+
+  const rows =
+  getPaperTrades();
+
+  const item =
+  rows.find(x =>
+    ['WAIT_ENTRY','OPEN','TP1_HIT'].includes(x.status)
+  ) || {
+    id:'SIM',
+    ticker:'TEST',
+    entry:1000,
+    tp1:1050,
+    tp2:1100,
+    cut_loss:950,
+    last_price:1000
+  };
+
+  if(status){
+    status.textContent =
+    'Tes badge dimulai. Pindah ke Genius sekarang, alert masuk 5 detik lagi...';
+  }
+
+  const geniusBtn =
+  Array.from(
+    document.querySelectorAll('.nav-item')
+  ).find(x =>
+    x.textContent.includes('Genius')
+  );
+
+  if(geniusBtn){
+    openBottomNav('overview',geniusBtn);
+  }
+
+  setTimeout(()=>{
+    addStockRadarAlert(
+      item,
+      '🔔 TEST BADGE ' + item.ticker,
+      '[SIMULASI] Alert badge 5 detik berhasil dipicu.',
+      'SIM:BADGE:' + Date.now()
+    );
+  },5000);
 }
 
 function simulateAlertEvent(type){

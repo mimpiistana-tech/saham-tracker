@@ -680,6 +680,281 @@ def scanner():
     })
 
 
+@app.route("/api/paper-check")
+def paper_check():
+    ticker = request.args.get("ticker", "").upper().strip()
+
+    try:
+        since = int(float(request.args.get("since", "0")))
+        entry = float(request.args.get("entry", "0"))
+        tp1 = float(request.args.get("tp1", "0"))
+        tp2 = float(request.args.get("tp2", "0"))
+        cut_loss = float(request.args.get("cl", "0"))
+    except ValueError:
+        return jsonify({
+            "success": False,
+            "error": "Parameter paper trade tidak valid",
+        }), 400
+
+    if (
+        not ticker
+        or since <= 0
+        or entry <= 0
+        or tp1 <= 0
+        or tp2 <= 0
+        or cut_loss <= 0
+    ):
+        return jsonify({
+            "success": False,
+            "error": "ticker, since, entry, tp1, tp2, cl wajib diisi",
+        }), 400
+
+    now_ts = int(time.time())
+    age_seconds = max(0, now_ts - since)
+
+    interval = "5m" if age_seconds <= 55 * 24 * 3600 else "1h"
+    symbol = f"{ticker}.JK"
+
+    try:
+        response = requests.get(
+            f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}",
+            params={
+                "period1": max(0, since - 300),
+                "period2": now_ts + 60,
+                "interval": interval,
+                "events": "history",
+                "includeAdjustedClose": "true",
+            },
+            headers={
+                "User-Agent": "Mozilla/5.0 StockRadar/1.0",
+                "accept": "application/json",
+            },
+            timeout=25,
+        )
+
+        if response.status_code != 200:
+            return jsonify({
+                "success": False,
+                "error": f"Yahoo paper check HTTP {response.status_code}",
+            }), response.status_code
+
+        payload = response.json()
+        chart = payload.get("chart") or {}
+        results = chart.get("result") or []
+
+        if not results:
+            return jsonify({
+                "success": False,
+                "error": "Yahoo belum mengembalikan data harga",
+            }), 404
+
+        result = results[0]
+        meta = result.get("meta") or {}
+        timestamps = result.get("timestamp") or []
+        quote_list = (
+            (result.get("indicators") or {}).get("quote") or [{}]
+        )
+        quote = quote_list[0] if quote_list else {}
+
+        highs = quote.get("high") or []
+        lows = quote.get("low") or []
+        closes = quote.get("close") or []
+
+        candles = []
+
+        for i, ts in enumerate(timestamps):
+            if ts < since:
+                continue
+
+            high = highs[i] if i < len(highs) else None
+            low = lows[i] if i < len(lows) else None
+            close = closes[i] if i < len(closes) else None
+
+            if close is None and high is None and low is None:
+                continue
+
+            close_value = float(
+                close
+                if close is not None
+                else high
+                if high is not None
+                else low
+            )
+
+            high_value = float(
+                high if high is not None else close_value
+            )
+            low_value = float(
+                low if low is not None else close_value
+            )
+
+            candles.append({
+                "ts": int(ts),
+                "high": high_value,
+                "low": low_value,
+                "close": close_value,
+            })
+
+        market_price = meta.get("regularMarketPrice")
+
+        if candles:
+            last_price = candles[-1]["close"]
+            high_since = max(x["high"] for x in candles)
+            low_since = min(x["low"] for x in candles)
+        else:
+            last_price = float(market_price or 0)
+            high_since = last_price
+            low_since = last_price
+
+        state = "WAIT_ENTRY"
+        entered = False
+        tp1_hit = False
+        entry_time = None
+        tp1_time = None
+        exit_time = None
+        exit_price = None
+
+        for candle in candles:
+            high = candle["high"]
+            low = candle["low"]
+            ts = candle["ts"]
+
+            if not entered:
+                if low <= entry:
+                    entered = True
+                    entry_time = ts
+                    state = "OPEN"
+                else:
+                    continue
+
+            # Conservative rule when targets and stop are inside same bar:
+            # assume stop happens first to avoid optimistic paper results.
+            if low <= cut_loss:
+                state = "CL"
+                exit_time = ts
+                exit_price = cut_loss
+                break
+
+            if high >= tp2:
+                tp1_hit = True
+                if tp1_time is None:
+                    tp1_time = ts
+                state = "TP2"
+                exit_time = ts
+                exit_price = tp2
+                break
+
+            if high >= tp1 and not tp1_hit:
+                tp1_hit = True
+                tp1_time = ts
+                state = "TP1_HIT"
+
+        if not candles and last_price > 0:
+            if last_price <= entry:
+                entered = True
+                state = "OPEN"
+
+            if entered and last_price <= cut_loss:
+                state = "CL"
+                exit_price = cut_loss
+            elif entered and last_price >= tp2:
+                tp1_hit = True
+                state = "TP2"
+                exit_price = tp2
+            elif entered and last_price >= tp1:
+                tp1_hit = True
+                state = "TP1_HIT"
+
+        pnl_pct = None
+
+        if entered and last_price > 0:
+            pnl_pct = ((last_price / entry) - 1.0) * 100.0
+
+        distance_entry_pct = (
+            ((last_price / entry) - 1.0) * 100.0
+            if last_price > 0 else None
+        )
+
+        distance_tp1_pct = (
+            ((tp1 / last_price) - 1.0) * 100.0
+            if last_price > 0 else None
+        )
+
+        distance_tp2_pct = (
+            ((tp2 / last_price) - 1.0) * 100.0
+            if last_price > 0 else None
+        )
+
+        distance_cl_pct = (
+            ((cut_loss / last_price) - 1.0) * 100.0
+            if last_price > 0 else None
+        )
+
+        if state == "WAIT_ENTRY":
+            monitor_note = "Menunggu harga masuk ke area entry."
+        elif state == "OPEN":
+            if (
+                distance_tp1_pct is not None
+                and abs(distance_tp1_pct) <= 1.5
+            ):
+                monitor_note = "Harga mendekati TP1."
+            elif (
+                distance_cl_pct is not None
+                and abs(distance_cl_pct) <= 1.5
+            ):
+                monitor_note = "Harga mendekati cut loss."
+            else:
+                monitor_note = "Posisi simulasi aktif."
+        elif state == "TP1_HIT":
+            monitor_note = "TP1 sudah tersentuh; memantau TP2 atau invalidasi."
+        elif state == "TP2":
+            monitor_note = "TP2 sudah tersentuh."
+        else:
+            monitor_note = "Cut loss sudah tersentuh."
+
+        return jsonify({
+            "success": True,
+            "ticker": ticker,
+            "source": "Yahoo Finance intraday",
+            "interval": interval,
+            "state": state,
+            "entry_triggered": entered,
+            "tp1_hit": tp1_hit,
+            "last_price": round(last_price, 2),
+            "pnl_pct": round(pnl_pct, 2) if pnl_pct is not None else None,
+            "high_since": round(high_since, 2),
+            "low_since": round(low_since, 2),
+            "distance_entry_pct": (
+                round(distance_entry_pct, 2)
+                if distance_entry_pct is not None else None
+            ),
+            "distance_tp1_pct": (
+                round(distance_tp1_pct, 2)
+                if distance_tp1_pct is not None else None
+            ),
+            "distance_tp2_pct": (
+                round(distance_tp2_pct, 2)
+                if distance_tp2_pct is not None else None
+            ),
+            "distance_cl_pct": (
+                round(distance_cl_pct, 2)
+                if distance_cl_pct is not None else None
+            ),
+            "entry_time": entry_time,
+            "tp1_time": tp1_time,
+            "exit_time": exit_time,
+            "exit_price": exit_price,
+            "note": monitor_note,
+            "checked_at": now_ts,
+        })
+
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "error": f"Paper check error: {e}",
+        }), 500
+
+
 @app.route("/api/radar")
 def radar():
     ticker = request.args.get("ticker", "").upper()

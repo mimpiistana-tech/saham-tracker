@@ -1114,11 +1114,13 @@ async function readBackgroundHealth(){
   document.getElementById('backgroundHealth');
 
   if(!target || !('indexedDB' in window)){
-    return;
+    return null;
   }
 
+  let db = null;
+
   try{
-    const db =
+    db =
     await new Promise((resolve,reject)=>{
       const req =
       indexedDB.open('stockradar_background',2);
@@ -1139,7 +1141,12 @@ async function readBackgroundHealth(){
         }
       };
 
-      req.onsuccess = ()=>resolve(req.result);
+      req.onsuccess = ()=>{
+        req.result.onversionchange = ()=>{
+          req.result.close();
+        };
+        resolve(req.result);
+      };
       req.onerror = ()=>reject(req.error);
     });
 
@@ -1158,7 +1165,7 @@ async function readBackgroundHealth(){
     if(!health){
       target.textContent =
       'Last background check: belum ada.';
-      return;
+      return null;
     }
 
     const when =
@@ -1175,9 +1182,16 @@ async function readBackgroundHealth(){
     ' • Trigger ' + (health.trigger || '-') +
     ' • Checked ' + Number(health.checked || 0) +
     ' • Fail ' + Number(health.failures || 0);
+
+    return health;
   }catch(e){
     target.textContent =
     'Last background check: gagal membaca status.';
+    return null;
+  }finally{
+    if(db){
+      db.close();
+    }
   }
 }
 
@@ -1202,9 +1216,15 @@ async function runBackgroundCheckNow(){
     const reg =
     await navigator.serviceWorker.ready;
 
+    try{
+      await reg.update();
+    }catch(e){
+      console.log('Service worker update check failed',e);
+    }
+
     const sw =
-    reg.active ||
-    navigator.serviceWorker.controller;
+    navigator.serviceWorker.controller ||
+    reg.active;
 
     if(!sw){
       if(target){
@@ -1214,17 +1234,54 @@ async function runBackgroundCheckNow(){
       return;
     }
 
+    const startedAt = Date.now();
+
     sw.postMessage({
       type:'CHECK_PAPER_NOW'
     });
 
-    await new Promise(resolve =>
-      setTimeout(resolve,2500)
-    );
+    let health = null;
 
+    for(let i=0;i<15;i++){
+      await new Promise(resolve =>
+        setTimeout(resolve,2000)
+      );
+
+      health =
+      await readBackgroundHealth();
+
+      if(
+        health &&
+        health.last_started_at >= startedAt - 1500 &&
+        health.state !== 'RUNNING'
+      ){
+        break;
+      }
+
+      if(target){
+        target.textContent =
+        'Last background check: masih berjalan... ' +
+        ((i + 1) * 2) + ' detik';
+      }
+    }
+
+    health =
     await readBackgroundHealth();
+
+    if(
+      !health ||
+      health.state === 'RUNNING'
+    ){
+      if(target){
+        target.textContent =
+        'Background check belum selesai. Render/Yahoo mungkin sedang lambat; coba lagi sebentar.';
+      }
+    }
+
     await importBackgroundAlerts();
   }catch(e){
+    console.log('Manual background check error',e);
+
     if(target){
       target.textContent =
       'Background check gagal dijalankan.';
@@ -1280,13 +1337,37 @@ async function importBackgroundAlerts(){
     return;
   }
 
+  let db = null;
+
   try{
-    const db =
+    db =
     await new Promise((resolve,reject)=>{
       const req =
-      indexedDB.open('stockradar_background',1);
+      indexedDB.open('stockradar_background',2);
 
-      req.onsuccess = ()=>resolve(req.result);
+      req.onupgradeneeded = ()=>{
+        const db = req.result;
+
+        if(!db.objectStoreNames.contains('paper_trades')){
+          db.createObjectStore('paper_trades',{keyPath:'id'});
+        }
+
+        if(!db.objectStoreNames.contains('background_alerts')){
+          db.createObjectStore('background_alerts',{keyPath:'event_key'});
+        }
+
+        if(!db.objectStoreNames.contains('monitor_meta')){
+          db.createObjectStore('monitor_meta',{keyPath:'key'});
+        }
+      };
+
+      req.onsuccess = ()=>{
+        req.result.onversionchange = ()=>{
+          req.result.close();
+        };
+        resolve(req.result);
+      };
+
       req.onerror = ()=>reject(req.error);
     });
 
@@ -1322,6 +1403,10 @@ async function importBackgroundAlerts(){
     renderAlerts();
   }catch(e){
     console.log('Import background alerts failed',e);
+  }finally{
+    if(db){
+      db.close();
+    }
   }
 }
 
@@ -1612,11 +1697,13 @@ async function syncPaperTradesToBackground(rows){
     return;
   }
 
+  let db = null;
+
   try{
-    const db =
+    db =
     await new Promise((resolve,reject)=>{
       const req =
-      indexedDB.open('stockradar_background',1);
+      indexedDB.open('stockradar_background',2);
 
       req.onupgradeneeded = ()=>{
         const db = req.result;
@@ -1628,25 +1715,45 @@ async function syncPaperTradesToBackground(rows){
         if(!db.objectStoreNames.contains('background_alerts')){
           db.createObjectStore('background_alerts',{keyPath:'event_key'});
         }
+
+        if(!db.objectStoreNames.contains('monitor_meta')){
+          db.createObjectStore('monitor_meta',{keyPath:'key'});
+        }
       };
 
-      req.onsuccess = ()=>resolve(req.result);
+      req.onsuccess = ()=>{
+        req.result.onversionchange = ()=>{
+          req.result.close();
+        };
+        resolve(req.result);
+      };
+
       req.onerror = ()=>reject(req.error);
     });
 
-    const tx =
-    db.transaction('paper_trades','readwrite');
+    await new Promise((resolve,reject)=>{
+      const tx =
+      db.transaction('paper_trades','readwrite');
 
-    const store =
-    tx.objectStore('paper_trades');
+      const store =
+      tx.objectStore('paper_trades');
 
-    store.clear();
+      store.clear();
 
-    (rows || []).forEach(item=>{
-      store.put(item);
+      (rows || []).forEach(item=>{
+        store.put(item);
+      });
+
+      tx.oncomplete = ()=>resolve();
+      tx.onerror = ()=>reject(tx.error);
+      tx.onabort = ()=>reject(tx.error);
     });
   }catch(e){
     console.log('Background sync storage error',e);
+  }finally{
+    if(db){
+      db.close();
+    }
   }
 }
 

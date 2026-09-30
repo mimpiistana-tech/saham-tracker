@@ -801,8 +801,16 @@ berapa persen mesin yang sudah aktif.
       🔔 Aktifkan Notifikasi
     </button>
 
+    <button id="testNotificationBtn" class="refresh" style="margin-top:10px" onclick="testStockRadarNotification()">
+      🧪 Tes Notifikasi
+    </button>
+
     <div id="notificationStatus" class="note">
       Status notifikasi: belum dicek.
+    </div>
+
+    <div id="testNotificationStatus" class="note">
+      Tes notifikasi: belum dijalankan.
     </div>
 
     <div class="note">
@@ -1217,7 +1225,7 @@ function updateNotificationStatus(){
   }
 }
 
-async function requestStockRadarNotifications(){
+async async function requestStockRadarNotifications(){
   if(!('Notification' in window)){
     updateNotificationStatus();
     return;
@@ -1230,6 +1238,80 @@ async function requestStockRadarNotifications(){
   }
 
   updateNotificationStatus();
+}
+
+async function testStockRadarNotification(){
+  const status =
+  document.getElementById('testNotificationStatus');
+
+  if(!('Notification' in window)){
+    if(status){
+      status.textContent =
+      'Tes notifikasi: browser tidak mendukung notifikasi web.';
+    }
+    return;
+  }
+
+  if(Notification.permission !== 'granted'){
+    try{
+      await Notification.requestPermission();
+    }catch(e){
+      console.log(e);
+    }
+  }
+
+  if(Notification.permission !== 'granted'){
+    if(status){
+      status.textContent =
+      'Tes notifikasi: izin notifikasi belum aktif.';
+    }
+    updateNotificationStatus();
+    return;
+  }
+
+  const title =
+  '✅ Tes StockRadar Berhasil';
+
+  const body =
+  'Kalau pesan ini muncul di HP, jalur notifikasi StockRadar sudah bekerja.';
+
+  try{
+    if('serviceWorker' in navigator){
+      const reg =
+      await navigator.serviceWorker.ready;
+
+      await reg.showNotification(title,{
+        body,
+        icon:'./icon-192.png',
+        badge:'./icon-192.png',
+        tag:'stockradar-test-' + Date.now(),
+        data:{url:'./'}
+      });
+    }else{
+      new Notification(title,{body});
+    }
+
+    if(status){
+      status.textContent =
+      'Tes notifikasi: berhasil dikirim ✅';
+    }
+  }catch(e){
+    console.log('Test notification error',e);
+
+    try{
+      new Notification(title,{body});
+
+      if(status){
+        status.textContent =
+        'Tes notifikasi: berhasil dikirim ✅';
+      }
+    }catch(inner){
+      if(status){
+        status.textContent =
+        'Tes notifikasi: gagal dikirim.';
+      }
+    }
+  }
 }
 
 function detectPaperTradeAlert(previous, current){

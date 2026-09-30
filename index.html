@@ -2311,6 +2311,179 @@ const RISK_ENGINE_KEY =
 const FULL_ANALYSIS_KEY =
 'stockradar_full_analysis_v1';
 
+const QUOTA_SHIELD_KEY =
+'stockradar_quota_shield_v1';
+
+const QUOTA_SHIELD_COOLDOWN_MS =
+30 * 60 * 1000;
+
+function getQuotaShield(){
+  try{
+    const raw =
+    JSON.parse(
+      localStorage.getItem(QUOTA_SHIELD_KEY) || '{}'
+    );
+
+    const until =
+    Number(raw.until || 0);
+
+    if(!until || Date.now() >= until){
+      localStorage.removeItem(QUOTA_SHIELD_KEY);
+
+      return {
+        active:false,
+        until:0,
+        reason:'',
+        status:0
+      };
+    }
+
+    return {
+      active:true,
+      until,
+      reason:String(raw.reason || ''),
+      status:Number(raw.status || 0),
+      triggeredAt:Number(raw.triggeredAt || 0)
+    };
+  }catch(e){
+    return {
+      active:false,
+      until:0,
+      reason:'',
+      status:0
+    };
+  }
+}
+
+function activateQuotaShield(status,reason){
+  const payload = {
+    active:true,
+    status:Number(status || 0),
+    reason:String(reason || ''),
+    triggeredAt:Date.now(),
+    until:Date.now() + QUOTA_SHIELD_COOLDOWN_MS
+  };
+
+  localStorage.setItem(
+    QUOTA_SHIELD_KEY,
+    JSON.stringify(payload)
+  );
+
+  return payload;
+}
+
+function clearQuotaShield(){
+  localStorage.removeItem(
+    QUOTA_SHIELD_KEY
+  );
+}
+
+function quotaShieldRemainingText(){
+  const shield =
+  getQuotaShield();
+
+  if(!shield.active){
+    return '';
+  }
+
+  const minutes =
+  Math.max(
+    1,
+    Math.ceil(
+      (shield.until - Date.now()) /
+      60000
+    )
+  );
+
+  return minutes + ' menit';
+}
+
+function getRadarCache(ticker,date){
+  try{
+    const raw =
+    localStorage.getItem(
+      'stockradar_data_' +
+      String(ticker || '').toUpperCase() +
+      '_' +
+      String(date || '')
+    );
+
+    if(!raw){
+      return null;
+    }
+
+    const cached =
+    JSON.parse(raw);
+
+    if(!cached || !cached.data){
+      return null;
+    }
+
+    return cached;
+  }catch(e){
+    return null;
+  }
+}
+
+function useRadarCache(
+  ticker,
+  date,
+  {
+    maxAgeMs=24 * 60 * 60 * 1000,
+    allowStale=false,
+    statusText='● Cache Full'
+  }={}
+){
+  const cached =
+  getRadarCache(ticker,date);
+
+  if(!cached){
+    return false;
+  }
+
+  const savedAt =
+  Number(cached.savedAt || 0);
+
+  const age =
+  savedAt > 0
+  ? Date.now() - savedAt
+  : Infinity;
+
+  const fresh =
+  Number.isFinite(age) &&
+  age >= 0 &&
+  age <= maxAgeMs;
+
+  if(!fresh && !allowStale){
+    return false;
+  }
+
+  renderRadar(cached.data);
+
+  if(fresh){
+    saveFullAnalysis(
+      ticker,
+      date,
+      cached.data,
+      savedAt
+    );
+  }
+
+  const status =
+  document.getElementById('apiStatus');
+
+  if(status){
+    status.textContent =
+    fresh
+    ? statusText
+    : '● Cache Lama';
+  }
+
+  renderPaperTrades();
+
+  return true;
+}
+
 function getFullAnalysisMap(){
   try{
     const raw =
@@ -2339,7 +2512,7 @@ function getFullAnalysis(ticker){
   return getFullAnalysisMap()[key] || null;
 }
 
-function saveFullAnalysis(ticker,date,raw){
+function saveFullAnalysis(ticker,date,raw,savedAt=Date.now()){
   const key =
   String(ticker || '')
   .trim()
@@ -2370,7 +2543,7 @@ function saveFullAnalysis(ticker,date,raw){
   map[key] = {
     ticker:key,
     date:date || '',
-    savedAt:Date.now(),
+    savedAt:Number(savedAt || Date.now()),
     radarScore:Number(radar.radar_score || 0),
     coverage:Number(radar.coverage || 0),
     brokerScore:Number(broker.score || 0),
@@ -3056,6 +3229,20 @@ function renderExecutionGateSummary(activeRows){
     ? '🟡 BELUM READY'
     : '🟢 SEMUA READY';
 
+  const quotaShield =
+  getQuotaShield();
+
+  const quotaShieldHtml =
+  quotaShield.active
+  ? (
+      '<br><span class="yellow">' +
+      '🛡️ Quota Shield aktif • API broker tidak dipanggil lagi selama ' +
+      quotaShieldRemainingText() +
+      ' kecuali cache tersedia.' +
+      '</span>'
+    )
+  : '';
+
   target.innerHTML =
   '<div class="status-title">STATUS EXECUTION GATE</div>' +
   '<div class="status-value ' + overallClass + '">' +
@@ -3066,6 +3253,7 @@ function renderExecutionGateSummary(activeRows){
   ' • WAIT ' + wait +
   ' • BLOKIR ' + blocked +
   ' • Total ' + rows.length +
+  quotaShieldHtml +
   '<br>READY hanya berarti seluruh aturan mesin lolos; bukan jaminan profit.' +
   '</div>';
 }
@@ -5212,6 +5400,63 @@ async function analyzeCandidate(ticker){
     setTimeout(resolve, 250)
   );
 
+  const date =
+  document
+  .getElementById('dateInput')
+  .value;
+
+  const usedFreshCache =
+  useRadarCache(
+    ticker,
+    date,
+    {
+      maxAgeMs:24 * 60 * 60 * 1000,
+      allowStale:false,
+      statusText:'● Full Analysis Cache'
+    }
+  );
+
+  if(usedFreshCache){
+    if(status){
+      status.textContent =
+      '● Full Analysis Cache';
+    }
+
+    return;
+  }
+
+  const shield =
+  getQuotaShield();
+
+  if(shield.active){
+    const usedAnyCache =
+    useRadarCache(
+      ticker,
+      date,
+      {
+        allowStale:true
+      }
+    );
+
+    if(status){
+      status.textContent =
+      usedAnyCache
+      ? '● Cache • Quota Shield'
+      : '● Quota Shield';
+    }
+
+    if(!usedAnyCache){
+      showError(
+        'Broker API masih limit. Quota Shield aktif sekitar ' +
+        quotaShieldRemainingText() +
+        ' agar kuota tidak terus terbuang.'
+      );
+    }
+
+    renderPaperTrades();
+    return;
+  }
+
   await loadRadar();
 }
 
@@ -5257,6 +5502,46 @@ if(!ticker){
   alert('Masukkan kode saham dulu.');
   return;
   }
+
+const shield =
+getQuotaShield();
+
+if(shield.active){
+  const usedFreshCache =
+  useRadarCache(
+    ticker,
+    date,
+    {
+      maxAgeMs:24 * 60 * 60 * 1000,
+      allowStale:false,
+      statusText:'● Cache • Quota Shield'
+    }
+  );
+
+  if(usedFreshCache){
+    return;
+  }
+
+  const usedAnyCache =
+  useRadarCache(
+    ticker,
+    date,
+    {
+      allowStale:true
+    }
+  );
+
+  if(!usedAnyCache){
+    showError(
+      'Broker API masih limit. Quota Shield menahan request sekitar ' +
+      quotaShieldRemainingText() +
+      ' lagi.'
+    );
+  }
+
+  renderPaperTrades();
+  return;
+}
 
 const now = Date.now();
 
@@ -5328,18 +5613,29 @@ encodeURIComponent(date),
   const errorText =
   await response.text();
 
-  throw new Error(
+  const apiError =
+  new Error(
     'HTTP ' +
     response.status +
     ' - ' +
     errorText
   );
 
+  apiError.status =
+  response.status;
+
+  apiError.body =
+  errorText;
+
+  throw apiError;
+
 }
 
 
     const data =
     await response.json();
+
+    clearQuotaShield();
     
   localStorage.setItem(
   'stockradar_data_' + ticker + '_' + date,
@@ -5362,9 +5658,55 @@ encodeURIComponent(date),
 
     console.error(error);
 
-    showError(
-  'ERROR: ' + error.message
-);
+    const errorText =
+    String(
+      error?.body ||
+      error?.message ||
+      ''
+    );
+
+    const quotaLimited =
+    Number(error?.status || 0) === 429 ||
+    /quota|rate.?limit|too many requests|request limit|limit exceeded/i
+    .test(errorText);
+
+    if(quotaLimited){
+      activateQuotaShield(
+        Number(error?.status || 429),
+        errorText
+      );
+
+      const usedCache =
+      useRadarCache(
+        ticker,
+        date,
+        {
+          allowStale:true
+        }
+      );
+
+      if(usedCache){
+        const status =
+        document.getElementById('apiStatus');
+
+        if(status){
+          status.textContent =
+          '● Cache • API Limit';
+        }
+      }else{
+        showError(
+          'Broker API kena limit. Quota Shield aktif ' +
+          quotaShieldRemainingText() +
+          ' supaya request tidak terus terbuang.'
+        );
+      }
+
+      renderPaperTrades();
+    }else{
+      showError(
+        'ERROR: ' + error.message
+      );
+    }
 
   }
   if(refreshBtn){

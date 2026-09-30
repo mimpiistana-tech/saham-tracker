@@ -1154,8 +1154,30 @@ function renderPaperTrades(){
       ? 'green'
       : 'red';
 
-    const isActive =
-    ['WAIT_ENTRY','OPEN','TP1_HIT'].includes(x.status);
+    const isWaiting =
+    x.status === 'WAIT_ENTRY';
+
+    const isOpen =
+    ['OPEN','TP1_HIT'].includes(x.status);
+
+    const distanceToEntry =
+    (
+      Number(x.last_price || 0) > 0 &&
+      Number(x.entry || 0) > 0
+    )
+    ? (
+        (Number(x.entry) / Number(x.last_price)) - 1
+      ) * 100
+    : null;
+
+    const entryHint =
+    isWaiting && distanceToEntry != null
+    ? (
+        ' • Jarak ke entry ' +
+        (distanceToEntry >= 0 ? '+' : '') +
+        distanceToEntry.toFixed(2) + '%'
+      )
+    : '';
 
     return `
     <div class="status-box">
@@ -1174,11 +1196,17 @@ function renderPaperTrades(){
         • TP2 ${compactNumber(x.tp2)}
         • CL ${compactNumber(x.cut_loss)}<br>
         Setup ${x.setup || '-'}
-        • Score ${Number(x.scanner_score || 0).toFixed(1)}<br>
+        • Score ${Number(x.scanner_score || 0).toFixed(1)}
+        ${entryHint}<br>
         ${x.monitor_note || 'Belum diperbarui.'}
       </div>
 
-      ${isActive ? `
+      ${isWaiting ? `
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:9px">
+          <button class="refresh" style="margin-top:0" onclick="refreshAllPaperTrades()">🔄 Harga</button>
+          <button class="refresh" style="margin-top:0;background:#ff7180" onclick="deletePaperTrade(${x.id})">🗑️ Hapus</button>
+        </div>
+      ` : isOpen ? `
         <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-top:9px">
           <button class="refresh" style="margin-top:0" onclick="refreshAllPaperTrades()">🔄 Harga</button>
           <button class="refresh" style="margin-top:0;background:#ffd166" onclick="closePaperTrade(${x.id},'TP')">✅ Tutup TP</button>

@@ -936,6 +936,23 @@ berapa persen mesin yang sudah aktif.
     <div class="note">
       Mengukur hasil nyata dari paper trade yang sudah selesai. Semakin banyak sampel, semakin berguna statistiknya.
     </div>
+
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:10px">
+      <button id="setupFilter7" class="refresh" style="margin-top:0;padding:12px 8px" onclick="setSetupPerformancePeriod(7)">
+        7 Hari
+      </button>
+      <button id="setupFilter30" class="refresh" style="margin-top:0;padding:12px 8px" onclick="setSetupPerformancePeriod(30)">
+        30 Hari
+      </button>
+      <button id="setupFilterAll" class="refresh" style="margin-top:0;padding:12px 8px" onclick="setSetupPerformancePeriod('all')">
+        Semua
+      </button>
+    </div>
+
+    <div id="setupPeriodNote" class="note">
+      Periode performa: Semua data.
+    </div>
+
     <div id="setupPerformance">
       <div class="loading">Belum ada data setup yang selesai.</div>
     </div>
@@ -2514,20 +2531,110 @@ function renderPaperTradeCard(x, history=false){
   `;
 }
 
+let setupPerformancePeriod =
+localStorage.getItem('stockradar_setup_period') || 'all';
+
+function setSetupPerformancePeriod(period){
+  setupPerformancePeriod =
+  String(period);
+
+  localStorage.setItem(
+    'stockradar_setup_period',
+    setupPerformancePeriod
+  );
+
+  renderPaperTrades();
+}
+
+function getSetupPerformanceCutoff(){
+  if(setupPerformancePeriod === 'all'){
+    return null;
+  }
+
+  const days =
+  Number(setupPerformancePeriod);
+
+  if(!Number.isFinite(days) || days <= 0){
+    return null;
+  }
+
+  return Date.now() - (days * 24 * 60 * 60 * 1000);
+}
+
+function renderSetupPeriodControls(){
+  const map = {
+    '7':'setupFilter7',
+    '30':'setupFilter30',
+    'all':'setupFilterAll'
+  };
+
+  Object.entries(map).forEach(([key,id])=>{
+    const btn =
+    document.getElementById(id);
+
+    if(!btn) return;
+
+    btn.style.opacity =
+    setupPerformancePeriod === key
+    ? '1'
+    : '0.55';
+  });
+
+  const note =
+  document.getElementById('setupPeriodNote');
+
+  if(note){
+    note.textContent =
+    setupPerformancePeriod === 'all'
+    ? 'Periode performa: Semua data.'
+    : 'Periode performa: ' +
+      setupPerformancePeriod +
+      ' hari terakhir.';
+  }
+}
+
 function renderSetupPerformance(historyRows){
   const target =
   document.getElementById('setupPerformance');
 
   if(!target) return;
 
+  renderSetupPeriodControls();
+
+  const cutoff =
+  getSetupPerformanceCutoff();
+
   const closed =
-  (historyRows || []).filter(x =>
-    ['TP2','TP','CL'].includes(x.status)
-  );
+  (historyRows || []).filter(x =>{
+    if(!['TP2','TP','CL'].includes(x.status)){
+      return false;
+    }
+
+    if(cutoff == null){
+      return true;
+    }
+
+    const t =
+    new Date(
+      x.closed_at ||
+      x.exit_time ||
+      x.created_at ||
+      0
+    ).getTime();
+
+    return Number.isFinite(t) && t >= cutoff;
+  });
 
   if(!closed.length){
+    const periodText =
+    setupPerformancePeriod === 'all'
+    ? 'semua periode'
+    : setupPerformancePeriod + ' hari terakhir';
+
     target.innerHTML =
-    '<div class="loading">Belum ada data setup yang selesai.</div>';
+    '<div class="loading">Belum ada data setup selesai untuk ' +
+    periodText +
+    '.</div>';
     return;
   }
 

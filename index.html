@@ -788,6 +788,33 @@ berapa persen mesin yang sudah aktif.
   </div>
 </section>
 
+<section id="alerts" class="section">
+  <div class="card">
+    <h2>🔔 Alert StockRadar</h2>
+    <div class="note">
+      Alert dibuat saat paper trade berubah status: ENTRY, TP1, TP2, atau CL.
+      Notifikasi browser bekerja saat StockRadar sedang terbuka/aktif.
+    </div>
+
+    <button id="notificationBtn" class="refresh" onclick="requestStockRadarNotifications()">
+      🔔 Aktifkan Notifikasi
+    </button>
+
+    <div id="notificationStatus" class="note">
+      Status notifikasi: belum dicek.
+    </div>
+
+    <div class="note">
+      Auto monitor: cek harga paper setiap 5 menit selama aplikasi aktif.
+    </div>
+
+    <h2 style="margin-top:18px">📣 Riwayat Alert</h2>
+    <div id="alertHistory">
+      <div class="loading">Belum ada alert.</div>
+    </div>
+  </div>
+</section>
+
 <section id="paper" class="section">
   <div class="card">
     <h2>🧪 Paper Trade</h2>
@@ -855,7 +882,8 @@ onclick="openBottomNav('scanner',this)">
 Scanner
 </div>
 
-<div class="nav-item">
+<div class="nav-item"
+onclick="openAlerts(this)">
 <span class="nav-icon">🔔</span>
 Alert
 </div>
@@ -892,6 +920,222 @@ function openBottomNav(id,btn){
     top: document.getElementById(id).offsetTop - 20,
     behavior:'smooth'
   });
+}
+
+function openAlerts(btn){
+  document
+  .querySelectorAll('.section')
+  .forEach(x=>x.classList.remove('active-section'));
+
+  document
+  .getElementById('alerts')
+  .classList.add('active-section');
+
+  document
+  .querySelectorAll('.nav-item')
+  .forEach(x=>x.classList.remove('active'));
+
+  btn.classList.add('active');
+
+  renderAlerts();
+  updateNotificationStatus();
+
+  window.scrollTo({
+    top: document.getElementById('alerts').offsetTop - 20,
+    behavior:'smooth'
+  });
+}
+
+function getStockRadarAlerts(){
+  try{
+    return JSON.parse(
+      localStorage.getItem('stockradar_alerts') || '[]'
+    );
+  }catch(e){
+    return [];
+  }
+}
+
+function saveStockRadarAlerts(rows){
+  localStorage.setItem(
+    'stockradar_alerts',
+    JSON.stringify(rows.slice(0,100))
+  );
+}
+
+function addStockRadarAlert(item, title, message, eventKey){
+  const rows = getStockRadarAlerts();
+
+  if(rows.some(x => x.event_key === eventKey)){
+    return;
+  }
+
+  const alertItem = {
+    id: Date.now(),
+    event_key: eventKey,
+    ticker: item.ticker,
+    title,
+    message,
+    created_at: new Date().toISOString()
+  };
+
+  rows.unshift(alertItem);
+  saveStockRadarAlerts(rows);
+  renderAlerts();
+
+  if(
+    'Notification' in window &&
+    Notification.permission === 'granted'
+  ){
+    try{
+      new Notification(title,{
+        body: message,
+        tag: eventKey
+      });
+    }catch(e){
+      console.log('Notification error',e);
+    }
+  }
+}
+
+function renderAlerts(){
+  const target =
+  document.getElementById('alertHistory');
+
+  if(!target) return;
+
+  const rows = getStockRadarAlerts();
+
+  if(!rows.length){
+    target.innerHTML =
+    '<div class="loading">Belum ada alert.</div>';
+    return;
+  }
+
+  target.innerHTML =
+  rows.map(x=>`
+    <div class="status-box">
+      <div class="status-title">
+        ${x.ticker} • ${new Date(x.created_at).toLocaleString('id-ID')}
+      </div>
+      <div class="status-value">
+        ${x.title}
+      </div>
+      <div class="small" style="margin-top:6px;line-height:1.6">
+        ${x.message}
+      </div>
+    </div>
+  `).join('');
+}
+
+function updateNotificationStatus(){
+  const target =
+  document.getElementById('notificationStatus');
+
+  const btn =
+  document.getElementById('notificationBtn');
+
+  if(!target) return;
+
+  if(!('Notification' in window)){
+    target.textContent =
+    'Browser ini belum mendukung notifikasi web.';
+    if(btn) btn.style.display = 'none';
+    return;
+  }
+
+  const permission = Notification.permission;
+
+  if(permission === 'granted'){
+    target.textContent =
+    'Status notifikasi: AKTIF ✅';
+    if(btn) btn.textContent = '✅ Notifikasi Aktif';
+  }else if(permission === 'denied'){
+    target.textContent =
+    'Status notifikasi: diblokir browser.';
+    if(btn) btn.textContent = '⚠️ Notifikasi Diblokir';
+  }else{
+    target.textContent =
+    'Status notifikasi: belum diizinkan.';
+    if(btn) btn.textContent = '🔔 Aktifkan Notifikasi';
+  }
+}
+
+async function requestStockRadarNotifications(){
+  if(!('Notification' in window)){
+    updateNotificationStatus();
+    return;
+  }
+
+  try{
+    await Notification.requestPermission();
+  }catch(e){
+    console.log(e);
+  }
+
+  updateNotificationStatus();
+}
+
+function detectPaperTradeAlert(previous, current){
+  const oldStatus =
+  previous?.status || 'WAIT_ENTRY';
+
+  const newStatus =
+  current?.status || oldStatus;
+
+  if(oldStatus === newStatus){
+    return;
+  }
+
+  const price =
+  compactNumber(current.last_price || current.entry);
+
+  if(
+    oldStatus === 'WAIT_ENTRY' &&
+    ['OPEN','TP1_HIT','TP2','CL'].includes(newStatus)
+  ){
+    addStockRadarAlert(
+      current,
+      '🎯 ENTRY ' + current.ticker,
+      'Harga menyentuh area entry ' +
+      compactNumber(current.entry) +
+      '. Harga pantauan ' + price + '.',
+      current.id + ':ENTRY'
+    );
+  }
+
+  if(
+    oldStatus !== 'TP1_HIT' &&
+    ['TP1_HIT','TP2'].includes(newStatus)
+  ){
+    addStockRadarAlert(
+      current,
+      '✅ TP1 ' + current.ticker,
+      'TP1 ' + compactNumber(current.tp1) +
+      ' sudah tersentuh.',
+      current.id + ':TP1'
+    );
+  }
+
+  if(newStatus === 'TP2'){
+    addStockRadarAlert(
+      current,
+      '🏆 TP2 ' + current.ticker,
+      'TP2 ' + compactNumber(current.tp2) +
+      ' sudah tersentuh.',
+      current.id + ':TP2'
+    );
+  }
+
+  if(newStatus === 'CL'){
+    addStockRadarAlert(
+      current,
+      '🛑 CUT LOSS ' + current.ticker,
+      'Level CL ' + compactNumber(current.cut_loss) +
+      ' sudah tersentuh.',
+      current.id + ':CL'
+    );
+  }
 }
 
 function openPaperTrades(btn){
@@ -1203,9 +1447,15 @@ async function refreshAllPaperTrades(){
     }
 
     try{
-      updated.push(
-        await updatePaperTrade(item)
+      const fresh =
+      await updatePaperTrade(item);
+
+      detectPaperTradeAlert(
+        item,
+        fresh
       );
+
+      updated.push(fresh);
     }catch(error){
       updated.push({
         ...item,
@@ -2372,6 +2622,36 @@ if(!dateInput.value){
   loadCachedRadar();
 });
 loadCachedRadar();
+
+updateNotificationStatus();
+renderAlerts();
+
+let paperAutoMonitorBusy = false;
+
+setInterval(async ()=>{
+  if(document.hidden || paperAutoMonitorBusy){
+    return;
+  }
+
+  const active =
+  getPaperTrades().some(x =>
+    ['WAIT_ENTRY','OPEN','TP1_HIT'].includes(x.status)
+  );
+
+  if(!active){
+    return;
+  }
+
+  paperAutoMonitorBusy = true;
+
+  try{
+    await refreshAllPaperTrades();
+  }catch(e){
+    console.log('Paper auto monitor error',e);
+  }finally{
+    paperAutoMonitorBusy = false;
+  }
+}, 5 * 60 * 1000);
 </script>
 
 </body>

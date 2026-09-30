@@ -959,6 +959,15 @@ berapa persen mesin yang sudah aktif.
       </div>
     </div>
 
+    <h2 style="margin-top:18px">🚦 Execution Gate</h2>
+    <div class="note">
+      Gate validasi sebelum entry nyata: Scanner, Analisa Full, broker, signal, Trade Guard, dan Portfolio Guard.
+      Paper Trade tetap boleh berjalan untuk mengumpulkan sampel meski Gate belum READY.
+    </div>
+    <div id="executionGateSummary" class="status-box">
+      <div class="loading">Belum ada posisi untuk divalidasi.</div>
+    </div>
+
     <div id="paperSummary" class="note">
       Belum ada statistik.
     </div>
@@ -2299,6 +2308,86 @@ function savePaperTrades(rows){
 const RISK_ENGINE_KEY =
 'stockradar_risk_engine_v1';
 
+const FULL_ANALYSIS_KEY =
+'stockradar_full_analysis_v1';
+
+function getFullAnalysisMap(){
+  try{
+    const raw =
+    JSON.parse(
+      localStorage.getItem(FULL_ANALYSIS_KEY) || '{}'
+    );
+
+    return raw && typeof raw === 'object'
+    ? raw
+    : {};
+  }catch(e){
+    return {};
+  }
+}
+
+function getFullAnalysis(ticker){
+  const key =
+  String(ticker || '')
+  .trim()
+  .toUpperCase();
+
+  if(!key){
+    return null;
+  }
+
+  return getFullAnalysisMap()[key] || null;
+}
+
+function saveFullAnalysis(ticker,date,raw){
+  const key =
+  String(ticker || '')
+  .trim()
+  .toUpperCase();
+
+  if(!key){
+    return;
+  }
+
+  const data =
+  raw?.data || raw?.result || raw || {};
+
+  const radar =
+  data.radar || {};
+
+  const broker =
+  data.broker || {};
+
+  const signal =
+  data.signal || {};
+
+  const metrics =
+  broker.metrics || {};
+
+  const map =
+  getFullAnalysisMap();
+
+  map[key] = {
+    ticker:key,
+    date:date || '',
+    savedAt:Date.now(),
+    radarScore:Number(radar.radar_score || 0),
+    coverage:Number(radar.coverage || 0),
+    brokerScore:Number(broker.score || 0),
+    brokerLabel:broker.label || '',
+    brokerImbalance:Number(metrics.imbalance || 0),
+    activeBrokers:Number(metrics.active_brokers || 0),
+    signalAction:String(signal.action || 'WAIT').toUpperCase(),
+    signalLabel:signal.label || '',
+    signalConfidence:Number(signal.confidence || 0)
+  };
+
+  localStorage.setItem(
+    FULL_ANALYSIS_KEY,
+    JSON.stringify(map)
+  );
+}
+
 function clampRiskNumber(value,min,max,fallback){
   const number = Number(value);
 
@@ -2750,6 +2839,232 @@ function evaluatePortfolioGuard(rows,settings=getRiskSettings()){
     maxPortfolioRiskPct,
     reason:'Risiko gabungan dan exposure portfolio masih dalam batas.'
   };
+}
+
+function evaluateExecutionGate(item,activeRows){
+  const rows =
+  Array.isArray(activeRows)
+  ? activeRows
+  : getPaperTrades().filter(x =>
+      ['WAIT_ENTRY','OPEN','TP1_HIT'].includes(x.status)
+    );
+
+  const analysis =
+  getFullAnalysis(item?.ticker);
+
+  const ageMs =
+  analysis?.savedAt
+  ? Date.now() - Number(analysis.savedAt)
+  : Infinity;
+
+  const analysisFresh =
+  Boolean(
+    analysis &&
+    Number.isFinite(ageMs) &&
+    ageMs >= 0 &&
+    ageMs <= 24 * 60 * 60 * 1000
+  );
+
+  const scannerPass =
+  Number(item?.scanner_score || 0) >= 55;
+
+  const fullAnalysisPass =
+  analysisFresh;
+
+  const brokerPass =
+  Boolean(
+    analysisFresh &&
+    Number(analysis?.brokerScore || 0) >= 58
+  );
+
+  const signalAction =
+  String(analysis?.signalAction || 'WAIT')
+  .toUpperCase();
+
+  const signalPass =
+  analysisFresh &&
+  signalAction === 'BUY';
+
+  const tradeGuard =
+  evaluateTradeGuard(item);
+
+  const riskPass =
+  tradeGuard.level === 'PASS';
+
+  const portfolioGuard =
+  evaluatePortfolioGuard(rows);
+
+  const portfolioPass =
+  portfolioGuard.level === 'PASS';
+
+  const checks = [
+    {
+      key:'scanner',
+      label:'Scanner',
+      pass:scannerPass,
+      detail:
+        scannerPass
+        ? 'Score ' + Number(item?.scanner_score || 0).toFixed(1)
+        : 'Belum lolos scanner'
+    },
+    {
+      key:'full',
+      label:'Analisa Full',
+      pass:fullAnalysisPass,
+      detail:
+        fullAnalysisPass
+        ? 'Fresh <24 jam'
+        : analysis
+          ? 'Analisa sudah >24 jam'
+          : 'Belum dianalisa'
+    },
+    {
+      key:'broker',
+      label:'Broker',
+      pass:brokerPass,
+      detail:
+        analysisFresh
+        ? 'Score ' + Number(analysis?.brokerScore || 0).toFixed(1)
+        : 'Menunggu Analisa Full'
+    },
+    {
+      key:'signal',
+      label:'Signal',
+      pass:signalPass,
+      detail:
+        analysisFresh
+        ? signalAction
+        : 'Menunggu Analisa Full'
+    },
+    {
+      key:'risk',
+      label:'Trade Guard',
+      pass:riskPass,
+      detail:tradeGuard.label
+    },
+    {
+      key:'portfolio',
+      label:'Portfolio',
+      pass:portfolioPass,
+      detail:portfolioGuard.label
+    }
+  ];
+
+  const hardBlock =
+  signalAction === 'SELL' ||
+  tradeGuard.level === 'BLOCK' ||
+  portfolioGuard.level === 'BLOCK';
+
+  if(hardBlock){
+    const reasons = [];
+
+    if(signalAction === 'SELL'){
+      reasons.push('signal Full Analysis = SELL');
+    }
+
+    if(tradeGuard.level === 'BLOCK'){
+      reasons.push('Trade Guard memblokir');
+    }
+
+    if(portfolioGuard.level === 'BLOCK'){
+      reasons.push('Portfolio Guard memblokir');
+    }
+
+    return {
+      level:'BLOCK',
+      label:'🔴 BLOKIR',
+      className:'red',
+      checks,
+      analysis,
+      reason:reasons.join(' • ')
+    };
+  }
+
+  if(checks.every(x => x.pass)){
+    return {
+      level:'READY',
+      label:'🟢 READY',
+      className:'green',
+      checks,
+      analysis,
+      reason:'Semua validasi Execution Gate terpenuhi.'
+    };
+  }
+
+  const missing =
+  checks
+  .filter(x => !x.pass)
+  .map(x => x.label);
+
+  return {
+    level:'WAIT',
+    label:'🟡 WAIT',
+    className:'yellow',
+    checks,
+    analysis,
+    reason:
+      'Menunggu: ' +
+      missing.join(', ') + '.'
+  };
+}
+
+function renderExecutionGateSummary(activeRows){
+  const target =
+  document.getElementById('executionGateSummary');
+
+  if(!target){
+    return;
+  }
+
+  const rows =
+  Array.isArray(activeRows)
+  ? activeRows
+  : [];
+
+  if(!rows.length){
+    target.innerHTML =
+    '<div class="loading">Belum ada posisi aktif untuk divalidasi.</div>';
+    return;
+  }
+
+  const gates =
+  rows.map(x => evaluateExecutionGate(x,rows));
+
+  const ready =
+  gates.filter(x => x.level === 'READY').length;
+
+  const wait =
+  gates.filter(x => x.level === 'WAIT').length;
+
+  const blocked =
+  gates.filter(x => x.level === 'BLOCK').length;
+
+  const overallClass =
+  blocked > 0
+  ? 'red'
+  : wait > 0
+    ? 'yellow'
+    : 'green';
+
+  const overallLabel =
+  blocked > 0
+  ? '🔴 ADA YANG DIBLOKIR'
+  : wait > 0
+    ? '🟡 BELUM READY'
+    : '🟢 SEMUA READY';
+
+  target.innerHTML =
+  '<div class="status-title">STATUS EXECUTION GATE</div>' +
+  '<div class="status-value ' + overallClass + '">' +
+  overallLabel +
+  '</div>' +
+  '<div class="small" style="margin-top:7px;line-height:1.7">' +
+  'READY ' + ready +
+  ' • WAIT ' + wait +
+  ' • BLOKIR ' + blocked +
+  ' • Total ' + rows.length +
+  '<br>READY hanya berarti seluruh aturan mesin lolos; bukan jaminan profit.' +
+  '</div>';
 }
 
 function renderRiskEngineSummary(activeRows){
@@ -3329,6 +3644,44 @@ function renderPaperTradeCard(x, history=false){
   ? null
   : calculateRiskPlan(x);
 
+  const activeRowsForGate =
+  history
+  ? []
+  : getPaperTrades().filter(item =>
+      ['WAIT_ENTRY','OPEN','TP1_HIT'].includes(item.status)
+    );
+
+  const executionGate =
+  history
+  ? null
+  : evaluateExecutionGate(
+      x,
+      activeRowsForGate
+    );
+
+  const executionChecksHtml =
+  executionGate
+  ? executionGate.checks
+      .map(check =>
+        (check.pass ? '✅ ' : '❌ ') +
+        check.label
+      )
+      .join(' • ')
+  : '';
+
+  const executionGateHtml =
+  executionGate
+  ? (
+      '<br><b class="' +
+      executionGate.className +
+      '">🚦 Execution Gate: ' +
+      executionGate.label +
+      '</b>' +
+      '<br>' + executionChecksHtml +
+      '<br>' + executionGate.reason
+    )
+  : '';
+
   const tradeGuard =
   history
   ? null
@@ -3422,7 +3775,8 @@ function renderPaperTradeCard(x, history=false){
         ${x.batch_tag === 'TOP3' ? ' • TOP 3 #' + Number(x.scanner_rank || 0) : ''}
         ${entryHint}
         ${riskPlanHtml}
-        ${tradeGuardHtml}<br>
+        ${tradeGuardHtml}
+        ${executionGateHtml}<br>
         ${x.monitor_note || 'Belum diperbarui.'}
         ${closedDate ? '<br>Selesai ' + closedDate : ''}
       </div>
@@ -3431,18 +3785,25 @@ function renderPaperTradeCard(x, history=false){
         <button class="refresh" style="margin-top:9px;background:#ff7180" onclick="deletePaperTrade(${x.id})">
           🗑️ Hapus Riwayat
         </button>
-      ` : isWaiting ? `
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:9px">
-          <button class="refresh" style="margin-top:0" onclick="refreshAllPaperTrades()">🔄 Harga</button>
-          <button class="refresh" style="margin-top:0;background:#ff7180" onclick="deletePaperTrade(${x.id})">🗑️ Hapus</button>
-        </div>
-      ` : isOpen ? `
-        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-top:9px">
-          <button class="refresh" style="margin-top:0" onclick="refreshAllPaperTrades()">🔄 Harga</button>
-          <button class="refresh" style="margin-top:0;background:#ffd166" onclick="closePaperTrade(${x.id},'TP')">✅ Tutup TP</button>
-          <button class="refresh" style="margin-top:0;background:#ff7180" onclick="deletePaperTrade(${x.id})">🗑️ Hapus</button>
-        </div>
-      ` : ''}
+      ` : `
+        <button class="refresh"
+          style="margin-top:9px;background:#65b7ff;color:#051522"
+          onclick="analyzeCandidate('${x.ticker}')">
+          🧠 Analisa Full ${x.ticker}
+        </button>
+        ${isWaiting ? `
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:7px">
+            <button class="refresh" style="margin-top:0" onclick="refreshAllPaperTrades()">🔄 Harga</button>
+            <button class="refresh" style="margin-top:0;background:#ff7180" onclick="deletePaperTrade(${x.id})">🗑️ Hapus</button>
+          </div>
+        ` : isOpen ? `
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-top:7px">
+            <button class="refresh" style="margin-top:0" onclick="refreshAllPaperTrades()">🔄 Harga</button>
+            <button class="refresh" style="margin-top:0;background:#ffd166" onclick="closePaperTrade(${x.id},'TP')">✅ Tutup TP</button>
+            <button class="refresh" style="margin-top:0;background:#ff7180" onclick="deletePaperTrade(${x.id})">🗑️ Hapus</button>
+          </div>
+        ` : ''}
+      `}
     </div>
   `;
 }
@@ -3912,6 +4273,7 @@ function renderPaperTrades(){
   rows.filter(x => !activeStatuses.has(x.status));
 
   renderRiskEngineSummary(activeRows);
+  renderExecutionGateSummary(activeRows);
 
   const wins =
   historyRows.filter(x =>
@@ -4985,6 +5347,12 @@ encodeURIComponent(date),
 );
 
     renderRadar(data);
+
+    saveFullAnalysis(
+      ticker,
+      date,
+      data
+    );
 
 
   }catch(error){

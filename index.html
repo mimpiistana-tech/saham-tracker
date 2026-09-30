@@ -2580,6 +2580,60 @@ function calculateRiskPlan(item,settings=getRiskSettings()){
   };
 }
 
+function evaluateTradeGuard(item,settings=getRiskSettings()){
+  const plan =
+  calculateRiskPlan(item,settings);
+
+  if(!plan.valid || plan.lots <= 0){
+    return {
+      level:'BLOCK',
+      label:'🔴 BLOKIR',
+      className:'red',
+      reason:'Risk plan tidak valid atau jumlah lot 0.'
+    };
+  }
+
+  const rr1 =
+  Number(plan.rr1 || 0);
+
+  const rr2 =
+  Number(plan.rr2 || 0);
+
+  if(
+    Number(item.entry || 0) <= Number(item.cut_loss || 0) ||
+    Number(item.tp2 || 0) <= Number(item.entry || 0) ||
+    plan.maxLoss > plan.riskBudget + 1 ||
+    plan.positionValue > plan.slotCapital + 1 ||
+    rr2 < 1.5
+  ){
+    return {
+      level:'BLOCK',
+      label:'🔴 BLOKIR',
+      className:'red',
+      reason:'Risk, modal slot, atau RR minimum tidak memenuhi aturan.'
+    };
+  }
+
+  if(
+    rr1 < 1 ||
+    rr2 < 2
+  ){
+    return {
+      level:'WARN',
+      label:'🟡 WARNING',
+      className:'yellow',
+      reason:'Masih dalam batas risk, tetapi RR belum ideal.'
+    };
+  }
+
+  return {
+    level:'PASS',
+    label:'🟢 AMAN RISK',
+    className:'green',
+    reason:'Ukuran posisi, batas rugi, dan RR memenuhi aturan simulasi.'
+  };
+}
+
 function renderRiskEngineSummary(activeRows){
   const target =
   document.getElementById('riskEngineSummary');
@@ -2687,6 +2741,7 @@ function addPaperTradesBatch(items){
   let skipped = 0;
   let unavailable = 0;
   let slotLimited = 0;
+  let guardBlocked = 0;
 
   candidates.forEach((item,index)=>{
     const plan =
@@ -2704,6 +2759,19 @@ function addPaperTradesBatch(items){
 
     if(availableSlots <= 0){
       slotLimited += 1;
+      return;
+    }
+
+    const guard =
+    evaluateTradeGuard({
+      entry:Number(plan.entry),
+      tp1:Number(plan.tp1),
+      tp2:Number(plan.tp2),
+      cut_loss:Number(plan.cut_loss)
+    },riskSettings);
+
+    if(guard.level === 'BLOCK'){
+      guardBlocked += 1;
       return;
     }
 
@@ -2745,6 +2813,7 @@ function addPaperTradesBatch(items){
     'TOP 3 → ditambahkan ' + added +
     ' • sudah aktif ' + skipped +
     ' • slot penuh ' + slotLimited +
+    ' • guard blokir ' + guardBlocked +
     ' • plan belum tersedia ' + unavailable;
   }
 
@@ -2807,6 +2876,27 @@ function addPaperTrade(item){
       activeCount + '/' +
       riskSettings.maxPositions +
       '). Selesaikan/hapus posisi atau ubah Maksimum posisi aktif.'
+    );
+
+    if(paperNav){
+      openPaperTrades(paperNav);
+    }
+
+    return;
+  }
+
+  const guard =
+  evaluateTradeGuard({
+    entry:Number(plan.entry),
+    tp1:Number(plan.tp1),
+    tp2:Number(plan.tp2),
+    cut_loss:Number(plan.cut_loss)
+  },riskSettings);
+
+  if(guard.level === 'BLOCK'){
+    alert(
+      'Trade Guard BLOKIR: ' +
+      guard.reason
     );
 
     if(paperNav){
@@ -3062,6 +3152,24 @@ function renderPaperTradeCard(x, history=false){
   ? null
   : calculateRiskPlan(x);
 
+  const tradeGuard =
+  history
+  ? null
+  : evaluateTradeGuard(x);
+
+  const tradeGuardHtml =
+  tradeGuard
+  ? (
+      '<br><b class="' +
+      tradeGuard.className +
+      '">🧱 Trade Guard: ' +
+      tradeGuard.label +
+      '</b>' +
+      '<br>' +
+      tradeGuard.reason
+    )
+  : '';
+
   const riskPlanHtml =
   riskPlan?.valid
   ? (
@@ -3136,7 +3244,8 @@ function renderPaperTradeCard(x, history=false){
         • Score ${Number(x.scanner_score || 0).toFixed(1)}
         ${x.batch_tag === 'TOP3' ? ' • TOP 3 #' + Number(x.scanner_rank || 0) : ''}
         ${entryHint}
-        ${riskPlanHtml}<br>
+        ${riskPlanHtml}
+        ${tradeGuardHtml}<br>
         ${x.monitor_note || 'Belum diperbarui.'}
         ${closedDate ? '<br>Selesai ' + closedDate : ''}
       </div>

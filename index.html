@@ -829,6 +829,30 @@ berapa persen mesin yang sudah aktif.
       🩺 Cek Background Sekarang
     </button>
 
+    <h2 style="margin-top:18px">🧪 Simulasi Event Alert</h2>
+    <div class="note">
+      Hanya untuk tes jalur notifikasi. Tidak mengubah status Paper Trade asli.
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px">
+      <button class="refresh" style="margin-top:0" onclick="simulateAlertEvent('ENTRY')">
+        🎯 ENTRY
+      </button>
+      <button class="refresh" style="margin-top:0" onclick="simulateAlertEvent('TP1')">
+        ✅ TP1
+      </button>
+      <button class="refresh" style="margin-top:0" onclick="simulateAlertEvent('TP2')">
+        🏆 TP2
+      </button>
+      <button class="refresh" style="margin-top:0;background:#ff7180" onclick="simulateAlertEvent('CL')">
+        🛑 CL
+      </button>
+    </div>
+
+    <div id="simAlertStatus" class="note">
+      Simulasi event: belum dijalankan.
+    </div>
+
     <h2 style="margin-top:18px">📣 Riwayat Alert</h2>
     <div id="alertHistory">
       <div class="loading">Belum ada alert.</div>
@@ -1030,13 +1054,38 @@ function addStockRadarAlert(item, title, message, eventKey){
     'Notification' in window &&
     Notification.permission === 'granted'
   ){
-    try{
-      new Notification(title,{
-        body: message,
-        tag: eventKey
+    if('serviceWorker' in navigator){
+      navigator.serviceWorker.ready
+      .then(reg =>
+        reg.showNotification(title,{
+          body: message,
+          icon:'./icon-192.png',
+          badge:'./icon-192.png',
+          tag:eventKey,
+          data:{url:'./'}
+        })
+      )
+      .catch(e=>{
+        console.log('Service worker notification error',e);
+
+        try{
+          new Notification(title,{
+            body: message,
+            tag: eventKey
+          });
+        }catch(inner){
+          console.log('Notification fallback error',inner);
+        }
       });
-    }catch(e){
-      console.log('Notification error',e);
+    }else{
+      try{
+        new Notification(title,{
+          body: message,
+          tag: eventKey
+        });
+      }catch(e){
+        console.log('Notification error',e);
+      }
     }
   }
 }
@@ -1539,6 +1588,88 @@ async function testStockRadarNotification(){
         'Tes notifikasi: gagal dikirim.';
       }
     }
+  }
+}
+
+function simulateAlertEvent(type){
+  const status =
+  document.getElementById('simAlertStatus');
+
+  const rows =
+  getPaperTrades();
+
+  const item =
+  rows.find(x =>
+    ['WAIT_ENTRY','OPEN','TP1_HIT'].includes(x.status)
+  ) || {
+    id:'SIM',
+    ticker:'TEST',
+    entry:1000,
+    tp1:1050,
+    tp2:1100,
+    cut_loss:950,
+    last_price:1000
+  };
+
+  const ticker =
+  item.ticker || 'TEST';
+
+  const stamp =
+  Date.now();
+
+  let title = '';
+  let message = '';
+
+  if(type === 'ENTRY'){
+    title =
+    '🎯 ENTRY ' + ticker;
+
+    message =
+    '[SIMULASI] Harga menyentuh area entry ' +
+    compactNumber(item.entry) + '.';
+  }
+  else if(type === 'TP1'){
+    title =
+    '✅ TP1 ' + ticker;
+
+    message =
+    '[SIMULASI] TP1 ' +
+    compactNumber(item.tp1) +
+    ' sudah tersentuh.';
+  }
+  else if(type === 'TP2'){
+    title =
+    '🏆 TP2 ' + ticker;
+
+    message =
+    '[SIMULASI] TP2 ' +
+    compactNumber(item.tp2) +
+    ' sudah tersentuh.';
+  }
+  else if(type === 'CL'){
+    title =
+    '🛑 CUT LOSS ' + ticker;
+
+    message =
+    '[SIMULASI] Level CL ' +
+    compactNumber(item.cut_loss) +
+    ' sudah tersentuh.';
+  }
+  else{
+    return;
+  }
+
+  addStockRadarAlert(
+    item,
+    title,
+    message,
+    'SIM:' + type + ':' + stamp
+  );
+
+  if(status){
+    status.textContent =
+    'Simulasi event ' + type +
+    ' berhasil dikirim ✅';
   }
 }
 

@@ -1074,6 +1074,20 @@ berapa persen mesin yang sudah aktif.
       <div class="loading">Belum ada snapshot Execution Gate saat entry.</div>
     </div>
 
+    <h2 style="margin-top:18px">🏁 Live Readiness Gate</h2>
+    <div class="note">
+      Gate ini hanya menilai apakah data Paper Trade sudah cukup kuat untuk direview sebelum mempertimbangkan uang asli.
+      Tidak pernah mengirim order, tidak membuka tombol BUY nyata, dan bukan jaminan profit.
+    </div>
+
+    <div id="liveReadinessGate" class="status-box">
+      <div class="loading">Menunggu hasil Validation Engine.</div>
+    </div>
+
+    <div id="liveReadinessChecks" class="status-box">
+      <div class="small">Belum ada kriteria yang bisa dinilai.</div>
+    </div>
+
     <h2 style="margin-top:18px">📈 Equity Curve Paper Trade</h2>
     <div class="note">
       Grafik kumulatif hasil paper trade yang sudah selesai. Garis naik berarti hasil total bertambah, garis turun menunjukkan drawdown.
@@ -4273,6 +4287,26 @@ function computeValidationMetrics(historyRows){
     )
   : null;
 
+  const grossProfit =
+  wins.reduce((a,b)=>a+b,0);
+
+  const grossLoss =
+  Math.abs(
+    losses.reduce((a,b)=>a+b,0)
+  );
+
+  const profitFactor =
+  grossLoss > 0
+  ? grossProfit / grossLoss
+  : grossProfit > 0
+    ? Infinity
+    : null;
+
+  const winRate =
+  closed.length
+  ? (wins.length / closed.length) * 100
+  : null;
+
   let cumulative = 0;
   let peak = 0;
   let maxDrawdown = 0;
@@ -4308,6 +4342,10 @@ function computeValidationMetrics(historyRows){
     expectancy,
     avgWin,
     avgLoss,
+    winRate,
+    grossProfit,
+    grossLoss,
+    profitFactor,
     maxDrawdown,
     tp1Hits,
     tp1Rate,
@@ -4661,6 +4699,269 @@ function renderValidationEngine(historyRows){
       ' trade • biasanya trade lama sebelum snapshot Gate aktif.</div>'
     : ''
   );
+}
+
+function evaluateLiveReadiness(historyRows){
+  const metrics =
+  computeValidationMetrics(historyRows);
+
+  const minSample = 30;
+  const strongSample = 50;
+  const minGateSnapshots = 15;
+  const minReadySamples = 5;
+  const minProfitFactor = 1.20;
+  const maxAllowedDrawdown = 10;
+
+  const knownGateRows =
+  metrics.closed.filter(x =>
+    ['READY','WAIT','BLOCK'].includes(
+      String(x.entry_gate_level || '').toUpperCase()
+    )
+  );
+
+  const readyRows =
+  knownGateRows.filter(x =>
+    String(x.entry_gate_level || '').toUpperCase() === 'READY'
+  );
+
+  const waitRows =
+  knownGateRows.filter(x =>
+    String(x.entry_gate_level || '').toUpperCase() === 'WAIT'
+  );
+
+  const readyStats =
+  validationGroupStats(readyRows);
+
+  const waitStats =
+  validationGroupStats(waitRows);
+
+  const checks = [
+    {
+      label:'Minimum sampel 30 trade',
+      pass:metrics.total >= minSample,
+      detail:metrics.total + '/30'
+    },
+    {
+      label:'Sampel kuat 50 trade',
+      pass:metrics.total >= strongSample,
+      detail:metrics.total + '/50'
+    },
+    {
+      label:'Expectancy positif',
+      pass:
+        metrics.expectancy != null &&
+        metrics.expectancy > 0,
+      detail:
+        metrics.expectancy == null
+        ? '--'
+        : (
+            (metrics.expectancy >= 0 ? '+' : '') +
+            metrics.expectancy.toFixed(2) + '%'
+          )
+    },
+    {
+      label:'Profit Factor ≥ 1.20',
+      pass:
+        metrics.profitFactor != null &&
+        (
+          metrics.profitFactor === Infinity ||
+          metrics.profitFactor >= minProfitFactor
+        ),
+      detail:
+        metrics.profitFactor == null
+        ? '--'
+        : metrics.profitFactor === Infinity
+          ? '∞'
+          : metrics.profitFactor.toFixed(2)
+    },
+    {
+      label:'Max Drawdown ≤ 10%',
+      pass:
+        metrics.total > 0 &&
+        metrics.maxDrawdown <= maxAllowedDrawdown,
+      detail:
+        metrics.total
+        ? metrics.maxDrawdown.toFixed(2) + '%'
+        : '--'
+    },
+    {
+      label:'Snapshot Gate ≥ 15 trade',
+      pass:knownGateRows.length >= minGateSnapshots,
+      detail:knownGateRows.length + '/15'
+    },
+    {
+      label:'READY cohort ≥ 5 trade',
+      pass:readyRows.length >= minReadySamples,
+      detail:readyRows.length + '/5'
+    }
+  ];
+
+  const qualityPass =
+  checks[2].pass &&
+  checks[3].pass &&
+  checks[4].pass;
+
+  const evidencePass =
+  checks[5].pass &&
+  checks[6].pass;
+
+  let level =
+  'LOCKED';
+
+  let label =
+  '🔒 BELUM CUKUP DATA';
+
+  let className =
+  'red';
+
+  let reason =
+  'Tetap Paper Trade. Sampel belum cukup untuk review live.';
+
+  if(metrics.total >= minSample && !qualityPass){
+    level =
+    'LOCKED';
+
+    label =
+    '🔴 METRIK BELUM LOLOS';
+
+    className =
+    'red';
+
+    reason =
+    'Jumlah sampel minimum tercapai, tetapi expectancy, profit factor, atau drawdown belum memenuhi threshold internal.';
+  }else if(
+    metrics.total >= minSample &&
+    qualityPass &&
+    (
+      metrics.total < strongSample ||
+      !evidencePass
+    )
+  ){
+    level =
+    'TESTING';
+
+    label =
+    '🟡 TESTING LANJUT';
+
+    className =
+    'yellow';
+
+    reason =
+    'Metrik utama cukup baik, tetapi sampel kuat atau bukti cohort Execution Gate masih kurang.';
+  }else if(
+    metrics.total >= strongSample &&
+    qualityPass &&
+    evidencePass
+  ){
+    level =
+    'REVIEW';
+
+    label =
+    '🟢 LAYAK DIEVALUASI';
+
+    className =
+    'green';
+
+    reason =
+    'Threshold internal tercapai. Status ini hanya membuka tahap review manusia, bukan izin otomatis menggunakan uang asli.';
+  }
+
+  return {
+    level,
+    label,
+    className,
+    reason,
+    checks,
+    metrics,
+    knownGateCount:knownGateRows.length,
+    readyStats,
+    waitStats
+  };
+}
+
+function renderLiveReadiness(historyRows){
+  const target =
+  document.getElementById('liveReadinessGate');
+
+  const checksTarget =
+  document.getElementById('liveReadinessChecks');
+
+  if(!target || !checksTarget){
+    return;
+  }
+
+  const result =
+  evaluateLiveReadiness(historyRows);
+
+  const metrics =
+  result.metrics;
+
+  const pfText =
+  metrics.profitFactor == null
+  ? '--'
+  : metrics.profitFactor === Infinity
+    ? '∞'
+    : metrics.profitFactor.toFixed(2);
+
+  const expectancyText =
+  metrics.expectancy == null
+  ? '--'
+  : (
+      (metrics.expectancy >= 0 ? '+' : '') +
+      metrics.expectancy.toFixed(2) + '%'
+    );
+
+  const readyAvg =
+  result.readyStats.avg == null
+  ? '--'
+  : (
+      (result.readyStats.avg >= 0 ? '+' : '') +
+      result.readyStats.avg.toFixed(2) + '%'
+    );
+
+  const waitAvg =
+  result.waitStats.avg == null
+  ? '--'
+  : (
+      (result.waitStats.avg >= 0 ? '+' : '') +
+      result.waitStats.avg.toFixed(2) + '%'
+    );
+
+  target.innerHTML =
+  '<div class="status-title">LIVE READINESS</div>' +
+  '<div class="status-value ' + result.className + '">' +
+  result.label +
+  '</div>' +
+  '<div class="small" style="margin-top:7px;line-height:1.7">' +
+  result.reason +
+  '<br>Trade selesai ' + metrics.total +
+  ' • Expectancy ' + expectancyText +
+  ' • PF ' + pfText +
+  ' • Max DD ' +
+  (
+    metrics.total
+    ? metrics.maxDrawdown.toFixed(2) + '%'
+    : '--'
+  ) +
+  '<br>READY cohort ' +
+  result.readyStats.total +
+  ' trade • AVG ' + readyAvg +
+  ' | WAIT cohort ' +
+  result.waitStats.total +
+  ' trade • AVG ' + waitAvg +
+  '<br><b>🔐 Real-order lock: ON</b>' +
+  '</div>';
+
+  checksTarget.innerHTML =
+  '<div class="status-title">CHECKLIST READINESS</div>' +
+  '<div class="small" style="margin-top:7px;line-height:1.9">' +
+  result.checks.map(check =>
+    (check.pass ? '✅ ' : '❌ ') +
+    check.label +
+    ' • ' +
+    check.detail
+  ).join('<br>') +
+  '</div>';
 }
 
 function renderEquityCurve(historyRows){
@@ -5224,6 +5525,10 @@ function renderPaperTrades(){
   );
 
   renderValidationEngine(
+    historyRows
+  );
+
+  renderLiveReadiness(
     historyRows
   );
 

@@ -1234,6 +1234,13 @@ async function runBackgroundCheckNow(){
       return;
     }
 
+    const paperRows =
+    getPaperTrades();
+
+    await syncPaperTradesToBackground(
+      paperRows
+    );
+
     const startedAt = Date.now();
 
     sw.postMessage({
@@ -1299,8 +1306,11 @@ async function setupBackgroundMonitor(){
     const reg =
     await navigator.serviceWorker.register('./sw.js');
 
+    const initialPaperRows =
+    getPaperTrades();
+
     await syncPaperTradesToBackground(
-      getPaperTrades()
+      initialPaperRows
     );
 
     if('periodicSync' in reg){

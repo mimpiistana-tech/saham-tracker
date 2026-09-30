@@ -932,6 +932,29 @@ berapa persen mesin yang sudah aktif.
       </div>
     </div>
 
+    <div id="paperAdvancedStats" class="grid" style="margin-top:10px">
+      <div class="tile">
+        <div class="tile-title">⚖️ PROFIT FACTOR</div>
+        <div id="paperProfitFactor" class="tile-value blue">--</div>
+        <div class="small">Gross profit ÷ gross loss</div>
+      </div>
+      <div class="tile">
+        <div class="tile-title">🔥 CURRENT STREAK</div>
+        <div id="paperCurrentStreak" class="tile-value yellow">--</div>
+        <div class="small">Urutan hasil terbaru</div>
+      </div>
+      <div class="tile">
+        <div class="tile-title">🏆 BEST WIN STREAK</div>
+        <div id="paperBestWinStreak" class="tile-value green">0</div>
+        <div class="small">Win beruntun terpanjang</div>
+      </div>
+      <div class="tile">
+        <div class="tile-title">🧯 WORST LOSS STREAK</div>
+        <div id="paperWorstLossStreak" class="tile-value red">0</div>
+        <div class="small">Loss beruntun terpanjang</div>
+      </div>
+    </div>
+
     <h2 style="margin-top:18px">📈 Equity Curve Paper Trade</h2>
     <div class="note">
       Grafik kumulatif hasil paper trade yang sudah selesai. Garis naik berarti hasil total bertambah, garis turun menunjukkan drawdown.
@@ -3045,6 +3068,116 @@ function renderPaperTrades(){
   ? (wins / closedCount) * 100
   : null;
 
+  const grossProfit =
+  realizedRows
+  .filter(x => Number(x.realized_pnl_pct) > 0)
+  .reduce(
+    (sum,x)=>sum + Number(x.realized_pnl_pct),
+    0
+  );
+
+  const grossLoss =
+  Math.abs(
+    realizedRows
+    .filter(x => Number(x.realized_pnl_pct) < 0)
+    .reduce(
+      (sum,x)=>sum + Number(x.realized_pnl_pct),
+      0
+    )
+  );
+
+  const profitFactor =
+  grossLoss > 0
+  ? grossProfit / grossLoss
+  : grossProfit > 0
+    ? Infinity
+    : null;
+
+  const completedChronological =
+  historyRows
+  .filter(x =>
+    ['TP2','TP','CL'].includes(x.status)
+  )
+  .sort((a,b)=>{
+    const ta =
+    new Date(
+      a.closed_at ||
+      a.exit_time ||
+      a.created_at ||
+      0
+    ).getTime();
+
+    const tb =
+    new Date(
+      b.closed_at ||
+      b.exit_time ||
+      b.created_at ||
+      0
+    ).getTime();
+
+    return ta - tb;
+  });
+
+  let bestWinStreak = 0;
+  let worstLossStreak = 0;
+  let runningWin = 0;
+  let runningLoss = 0;
+
+  for(const item of completedChronological){
+    const isWin =
+    ['TP2','TP'].includes(item.status);
+
+    if(isWin){
+      runningWin += 1;
+      runningLoss = 0;
+      bestWinStreak =
+      Math.max(bestWinStreak,runningWin);
+    }else{
+      runningLoss += 1;
+      runningWin = 0;
+      worstLossStreak =
+      Math.max(worstLossStreak,runningLoss);
+    }
+  }
+
+  let currentStreakText = '--';
+  let currentStreakClass = 'yellow';
+
+  if(completedChronological.length){
+    const last =
+    completedChronological[
+      completedChronological.length - 1
+    ];
+
+    const lastWin =
+    ['TP2','TP'].includes(last.status);
+
+    let count = 0;
+
+    for(
+      let i = completedChronological.length - 1;
+      i >= 0;
+      i--
+    ){
+      const itemWin =
+      ['TP2','TP'].includes(
+        completedChronological[i].status
+      );
+
+      if(itemWin !== lastWin){
+        break;
+      }
+
+      count += 1;
+    }
+
+    currentStreakText =
+    (lastWin ? 'WIN ' : 'LOSS ') + count;
+
+    currentStreakClass =
+    lastWin ? 'green' : 'red';
+  }
+
   const tp1Hits =
   activeRows.filter(x =>
     x.status === 'TP1_HIT'
@@ -3077,6 +3210,18 @@ function renderPaperTrades(){
 
   const lossesEl =
   document.getElementById('paperLosses');
+
+  const profitFactorEl =
+  document.getElementById('paperProfitFactor');
+
+  const currentStreakEl =
+  document.getElementById('paperCurrentStreak');
+
+  const bestWinStreakEl =
+  document.getElementById('paperBestWinStreak');
+
+  const worstLossStreakEl =
+  document.getElementById('paperWorstLossStreak');
 
   if(winRateEl){
     winRateEl.textContent =
@@ -3111,6 +3256,44 @@ function renderPaperTrades(){
 
   if(lossesEl){
     lossesEl.textContent = losses;
+  }
+
+  if(profitFactorEl){
+    profitFactorEl.textContent =
+    profitFactor == null
+    ? '--'
+    : profitFactor === Infinity
+      ? '∞'
+      : profitFactor.toFixed(2);
+
+    profitFactorEl.className =
+    'tile-value ' +
+    (
+      profitFactor == null
+      ? 'blue'
+      : profitFactor >= 1
+        ? 'green'
+        : 'red'
+    );
+  }
+
+  if(currentStreakEl){
+    currentStreakEl.textContent =
+    currentStreakText;
+
+    currentStreakEl.className =
+    'tile-value ' +
+    currentStreakClass;
+  }
+
+  if(bestWinStreakEl){
+    bestWinStreakEl.textContent =
+    bestWinStreak;
+  }
+
+  if(worstLossStreakEl){
+    worstLossStreakEl.textContent =
+    worstLossStreak;
   }
 
   target.innerHTML =

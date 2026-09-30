@@ -1177,6 +1177,331 @@ def historical_replay():
     })
 
 
+
+def run_historical_replay_ticker(
+    ticker,
+    date_to,
+    lookback_sessions=300,
+    max_trades=30,
+    entry_wait=5,
+    max_hold=20,
+):
+    calendar_days = min(
+        1800,
+        max(
+            500,
+            int(lookback_sessions * 2.2) + 260,
+        ),
+    )
+
+    data, status, cache_state = get_historical_ohlcv(
+        ticker,
+        date_to,
+        calendar_days,
+    )
+
+    if status != 200:
+        return {
+            "success": False,
+            "ticker": ticker,
+            "error": data.get("error", "Replay gagal"),
+            "status": status,
+        }
+
+    rows = extract_ohlcv_rows(data)
+
+    if len(rows) < 80:
+        return {
+            "success": False,
+            "ticker": ticker,
+            "error": "Data historis belum cukup untuk replay",
+            "status": 422,
+        }
+
+    start_index = max(
+        60,
+        len(rows) - lookback_sessions,
+    )
+
+    trades = []
+    signals_seen = 0
+    expired_signals = 0
+    i = start_index
+
+    while i < len(rows) - 1 and len(trades) < max_trades:
+        history = rows[:i + 1]
+
+        item = build_scanner_item_from_rows(
+            ticker,
+            history,
+            "REPLAY",
+        )
+
+        if (
+            not item
+            or item.get("setup") not in {
+                "Momentum",
+                "Watch Pullback",
+                "Early Watch",
+            }
+            or float(item.get("score") or 0) < 55
+        ):
+            i += 1
+            continue
+
+        signals_seen += 1
+
+        simulation = simulate_historical_trade(
+            rows,
+            i,
+            item,
+            entry_wait,
+            max_hold,
+        )
+
+        if simulation.get("entered"):
+            trades.append(simulation["trade"])
+        else:
+            expired_signals += 1
+
+        next_index = int(
+            simulation.get("end_index", i)
+        )
+
+        i = max(
+            i + 1,
+            next_index + 1,
+        )
+
+    summary = summarize_historical_trades(trades)
+
+    return {
+        "success": True,
+        "ticker": ticker,
+        "cache": cache_state,
+        "signals_seen": signals_seen,
+        "expired_signals": expired_signals,
+        "summary": summary,
+        "trades": trades,
+    }
+
+
+@app.route("/api/historical-replay-batch")
+def historical_replay_batch():
+    raw_tickers = request.args.get("tickers", "")
+    date_to = request.args.get("to")
+
+    try:
+        lookback_sessions = int(
+            request.args.get("sessions", "300")
+        )
+        max_trades = int(
+            request.args.get("max_trades", "30")
+        )
+        entry_wait = int(
+            request.args.get("entry_wait", "5")
+        )
+        max_hold = int(
+            request.args.get("max_hold", "20")
+        )
+    except ValueError:
+        return jsonify({
+            "success": False,
+            "error": "Parameter batch replay harus berupa angka",
+        }), 400
+
+    if not date_to:
+        return jsonify({
+            "success": False,
+            "error": "Parameter to wajib diisi",
+        }), 400
+
+    try:
+        datetime.strptime(date_to, "%Y-%m-%d")
+    except ValueError:
+        return jsonify({
+            "success": False,
+            "error": "Format tanggal harus YYYY-MM-DD",
+        }), 400
+
+    requested = []
+
+    for part in raw_tickers.replace(";", ",").split(","):
+        ticker = part.strip().upper()
+
+        if not ticker:
+            continue
+
+        if ticker not in requested:
+            requested.append(ticker)
+
+    if not requested:
+        requested = [
+            "BBRI", "BBCA", "BMRI", "TLKM", "ASII",
+            "UNTR", "PTBA", "ANTM", "SMDR", "PWON",
+        ]
+
+    requested = requested[:20]
+
+    lookback_sessions = max(
+        80,
+        min(lookback_sessions, 600),
+    )
+    max_trades = max(
+        5,
+        min(max_trades, 50),
+    )
+    entry_wait = max(
+        1,
+        min(entry_wait, 10),
+    )
+    max_hold = max(
+        3,
+        min(max_hold, 60),
+    )
+
+    results = []
+
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        futures = {
+            executor.submit(
+                run_historical_replay_ticker,
+                ticker,
+                date_to,
+                lookback_sessions,
+                max_trades,
+                entry_wait,
+                max_hold,
+            ): ticker
+            for ticker in requested
+        }
+
+        for future in as_completed(futures):
+            ticker = futures[future]
+
+            try:
+                result = future.result()
+            except Exception as e:
+                result = {
+                    "success": False,
+                    "ticker": ticker,
+                    "error": str(e),
+                    "status": 500,
+                }
+
+            results.append(result)
+
+    results.sort(
+        key=lambda x: requested.index(x.get("ticker"))
+        if x.get("ticker") in requested
+        else 999
+    )
+
+    successful = [
+        x for x in results
+        if x.get("success")
+    ]
+
+    failed = [
+        x for x in results
+        if not x.get("success")
+    ]
+
+    all_trades = []
+
+    for result in successful:
+        all_trades.extend(
+            result.get("trades") or []
+        )
+
+    all_trades.sort(
+        key=lambda x: (
+            x.get("exit_date") or "",
+            x.get("ticker") or "",
+        )
+    )
+
+    combined_summary = summarize_historical_trades(
+        all_trades
+    )
+
+    setup_summary = {}
+
+    for setup in [
+        "Momentum",
+        "Watch Pullback",
+        "Early Watch",
+    ]:
+        setup_trades = [
+            x for x in all_trades
+            if x.get("setup") == setup
+        ]
+
+        if setup_trades:
+            setup_summary[setup] = (
+                summarize_historical_trades(setup_trades)
+            )
+
+    score_bands = [
+        ("Score <55", lambda score: score < 55),
+        ("Score 55-64.9", lambda score: 55 <= score < 65),
+        ("Score 65-74.9", lambda score: 65 <= score < 75),
+        ("Score 75+", lambda score: score >= 75),
+    ]
+
+    score_summary = {}
+
+    for label, predicate in score_bands:
+        band_trades = [
+            x for x in all_trades
+            if predicate(float(x.get("score") or 0))
+        ]
+
+        if band_trades:
+            score_summary[label] = (
+                summarize_historical_trades(band_trades)
+            )
+
+    per_ticker = []
+
+    for result in successful:
+        per_ticker.append({
+            "ticker": result.get("ticker"),
+            "signals_seen": result.get("signals_seen", 0),
+            "expired_signals": result.get("expired_signals", 0),
+            "summary": result.get("summary") or {},
+        })
+
+    return jsonify({
+        "success": True,
+        "date_to": date_to,
+        "source": "Yahoo Finance daily OHLCV",
+        "settings": {
+            "lookback_sessions": lookback_sessions,
+            "max_trades_per_ticker": max_trades,
+            "entry_wait_sessions": entry_wait,
+            "max_hold_sessions": max_hold,
+            "ticker_count": len(requested),
+        },
+        "assumptions": [
+            "Batch memakai aturan replay teknikal yang sama dengan Single Historical Replay.",
+            "Broker summary IndexAlpha tidak dipakai.",
+            "Jika CL dan target tersentuh pada candle harian yang sama, replay memilih CL.",
+            "Biaya transaksi, slippage, antrean order, dan corporate action belum dimasukkan.",
+            "Hasil batch tidak menggantikan forward Paper Trade.",
+        ],
+        "tickers": requested,
+        "successful_tickers": len(successful),
+        "failed_tickers": len(failed),
+        "failed": failed,
+        "summary": combined_summary,
+        "setup_summary": setup_summary,
+        "score_summary": score_summary,
+        "per_ticker": per_ticker,
+        "trades": all_trades[-50:],
+    })
+
+
 @app.route("/api/paper-check")
 def paper_check():
     ticker = request.args.get("ticker", "").upper().strip()

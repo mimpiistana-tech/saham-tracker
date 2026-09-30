@@ -2895,7 +2895,7 @@ function evaluateExecutionGate(item,activeRows){
   evaluatePortfolioGuard(rows);
 
   const portfolioPass =
-  portfolioGuard.level === 'PASS';
+  portfolioGuard.level !== 'BLOCK';
 
   const checks = [
     {
@@ -2946,7 +2946,10 @@ function evaluateExecutionGate(item,activeRows){
       key:'portfolio',
       label:'Portfolio',
       pass:portfolioPass,
-      detail:portfolioGuard.label
+      detail:
+        portfolioGuard.level === 'WARN'
+        ? portfolioGuard.label + ' (boleh lanjut, tapi tidak boleh tambah posisi bila slot/risk penuh)'
+        : portfolioGuard.label
     }
   ];
 

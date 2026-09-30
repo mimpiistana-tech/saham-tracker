@@ -6358,6 +6358,69 @@ async function runWalkForwardValidation(){
   chunks.length +
   ' batch agar tidak timeout. Memulai batch 1...</div>';
 
+  let globalCutoffDate = '';
+
+  try{
+    const cutoffResponse =
+    await fetch(
+      'https://saham-tracker-api.onrender.com/api/walk-forward-cutoff?reference=BBCA&to=' +
+      encodeURIComponent(date) +
+      '&sessions=' +
+      encodeURIComponent(sessions) +
+      '&train_pct=70',
+      {cache:'no-store'}
+    );
+
+    const cutoffBody =
+    await cutoffResponse.text();
+
+    let cutoffData = {};
+
+    try{
+      cutoffData =
+      cutoffBody
+      ? JSON.parse(cutoffBody)
+      : {};
+    }catch(e){
+      cutoffData = {};
+    }
+
+    if(!cutoffResponse.ok){
+      throw new Error(
+        cutoffData.error ||
+        cutoffBody ||
+        'Gagal menentukan global cutoff'
+      );
+    }
+
+    globalCutoffDate =
+    cutoffData.cutoff_signal_date || '';
+
+    if(!globalCutoffDate){
+      throw new Error(
+        'Global cutoff kosong'
+      );
+    }
+
+    target.innerHTML =
+    '<div class="note">' +
+      'Global cutoff: <b>' +
+      globalCutoffDate +
+      '</b> • semua batch akan memakai tanggal yang sama.' +
+    '</div>' +
+    '<div class="loading">Memulai batch 1/' +
+    chunks.length +
+    '...</div>';
+
+  }catch(error){
+    target.innerHTML =
+    '<div class="note error">Gagal menentukan Global Cutoff: ' +
+    error.message +
+    '</div>';
+
+    return;
+  }
+
   const pct = value =>
   value == null
   ? '--'
@@ -6447,7 +6510,8 @@ async function runWalkForwardValidation(){
           ${batchTickers.join(', ')}
         </div>
         <div class="small" style="margin-top:6px;line-height:1.7">
-          Cutoff signal ${data.settings?.cutoff_signal_date || '--'}
+          Cutoff global ${data.settings?.cutoff_signal_date || '--'}
+          • Sumber ${data.settings?.cutoff_source || '--'}
           • Ticker sukses ${Number(data.successful_tickers || 0)}/${Number(data.settings?.ticker_count || batchTickers.length)}
         </div>
       </div>
@@ -6493,7 +6557,8 @@ async function runWalkForwardValidation(){
         encodeURIComponent(sessions) +
         '&max_signals=' +
         encodeURIComponent(maxSignals) +
-        '&entry_wait=5&max_hold=20&train_pct=70',
+        '&entry_wait=5&max_hold=20&train_pct=70&cutoff_date=' +
+        encodeURIComponent(globalCutoffDate),
         {
           cache:'no-store',
           signal:controller.signal
@@ -6556,7 +6621,9 @@ async function runWalkForwardValidation(){
     chunks.length +
     ' • Gagal ' +
     failedCount +
-    '<br>Data dibagi maksimal 5 ticker per request untuk menghindari timeout Render. Bandingkan apakah pola konsisten antar batch; jangan hanya melihat satu kelompok.' +
+    '<br>Global cutoff ' +
+    globalCutoffDate +
+    ' dipakai sama untuk semua batch. Data tetap dibagi maksimal 5 ticker per request untuk menghindari timeout Render.' +
   '</div>' +
   batchHtml.join('');
 }

@@ -302,9 +302,29 @@ td{
 }
 
 .nav-item{
+  position:relative;
   text-align:center;
   color:#8298ae;
   font-size:11px;
+}
+
+.alert-count{
+  position:absolute;
+  top:-7px;
+  right:8px;
+  min-width:18px;
+  height:18px;
+  padding:0 5px;
+  border-radius:10px;
+  display:none;
+  align-items:center;
+  justify-content:center;
+  background:#ff5263;
+  color:white;
+  font-size:10px;
+  font-weight:900;
+  line-height:18px;
+  border:2px solid #071522;
 }
 
 .nav-item.active{
@@ -938,6 +958,7 @@ role="button"
 tabindex="0"
 onclick="openBottomNav('alerts',this)"
 ontouchend="openBottomNav('alerts',this)">
+<span id="alertCountBadge" class="alert-count">0</span>
 <span class="nav-icon">🔔</span>
 Alert
 </div>
@@ -978,8 +999,12 @@ function openBottomNav(id,btn){
   }
 
   if(id === 'alerts'){
+    setAlertUnread(0);
     renderAlerts();
     updateNotificationStatus();
+    updateBackgroundStatus();
+    readBackgroundHealth();
+    importBackgroundAlerts();
   }
 
   if(id === 'paper'){
@@ -1007,6 +1032,7 @@ function openAlerts(btn){
 
   btn.classList.add('active');
 
+  setAlertUnread(0);
   renderAlerts();
   updateNotificationStatus();
   updateBackgroundStatus();
@@ -1017,6 +1043,64 @@ function openAlerts(btn){
     top: document.getElementById('alerts').offsetTop - 20,
     behavior:'smooth'
   });
+}
+
+function isAlertSectionOpen(){
+  const section =
+  document.getElementById('alerts');
+
+  return Boolean(
+    section &&
+    section.classList.contains('active-section')
+  );
+}
+
+function getAlertUnread(){
+  return Math.max(
+    0,
+    Number(
+      localStorage.getItem('stockradar_alert_unread') || 0
+    )
+  );
+}
+
+function setAlertUnread(value){
+  const count =
+  Math.max(0,Number(value || 0));
+
+  localStorage.setItem(
+    'stockradar_alert_unread',
+    String(count)
+  );
+
+  updateAlertBadge();
+}
+
+function incrementAlertUnread(amount=1){
+  setAlertUnread(
+    getAlertUnread() +
+    Math.max(0,Number(amount || 0))
+  );
+}
+
+function updateAlertBadge(){
+  const badge =
+  document.getElementById('alertCountBadge');
+
+  if(!badge) return;
+
+  const count =
+  getAlertUnread();
+
+  if(count <= 0){
+    badge.style.display = 'none';
+    badge.textContent = '0';
+    return;
+  }
+
+  badge.style.display = 'flex';
+  badge.textContent =
+  count > 99 ? '99+' : String(count);
 }
 
 function getStockRadarAlerts(){
@@ -1058,6 +1142,11 @@ function addStockRadarAlert(item, title, message, eventKey){
 
   rows.unshift(alertItem);
   saveStockRadarAlerts(rows);
+
+  if(!isAlertSectionOpen()){
+    incrementAlertUnread(1);
+  }
+
   renderAlerts();
 
   if(
@@ -1485,13 +1574,24 @@ async function importBackgroundAlerts(){
     const seen =
     new Set(local.map(x=>x.event_key));
 
+    let addedCount = 0;
+
     for(const item of rows){
       if(!seen.has(item.event_key)){
         local.unshift(item);
+        addedCount += 1;
       }
     }
 
     saveStockRadarAlerts(local);
+
+    if(
+      addedCount > 0 &&
+      !isAlertSectionOpen()
+    ){
+      incrementAlertUnread(addedCount);
+    }
+
     renderAlerts();
   }catch(e){
     console.log('Import background alerts failed',e);
@@ -3400,6 +3500,7 @@ if(!dateInput.value){
 loadCachedRadar();
 
 updateNotificationStatus();
+updateAlertBadge();
 renderAlerts();
 setupBackgroundMonitor();
 importBackgroundAlerts();

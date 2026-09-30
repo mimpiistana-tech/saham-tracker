@@ -495,6 +495,14 @@ def scan_one_ticker(ticker, date_to):
 
     entry_low = max(0.0, ma20 - (0.50 * atr14))
     entry_high = max(0.0, ma20 + (0.35 * atr14))
+    entry_mid = (entry_low + entry_high) / 2 if entry_high > 0 else close
+
+    paper_cut_loss = max(
+        0.0,
+        entry_low - (0.75 * atr14),
+    )
+    paper_tp1 = entry_mid + (1.50 * atr14)
+    paper_tp2 = entry_mid + (3.00 * atr14)
 
     return {
         "ticker": ticker,
@@ -511,6 +519,14 @@ def scan_one_ticker(ticker, date_to):
         "atr_pct": risk_metrics.get("atr_pct"),
         "avg_value_20": round(avg_value_20, 2),
         "active_days_20": active_days,
+        "paper_plan": {
+            "entry": round(entry_mid, 2),
+            "cut_loss": round(paper_cut_loss, 2),
+            "tp1": round(paper_tp1, 2),
+            "tp2": round(paper_tp2, 2),
+            "source": "scanner_technical_only",
+            "note": "Simulasi teknikal awal tanpa broker summary",
+        },
         "cache": cache_state,
     }
 

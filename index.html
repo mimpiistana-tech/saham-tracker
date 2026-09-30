@@ -932,6 +932,14 @@ berapa persen mesin yang sudah aktif.
       </div>
     </div>
 
+    <h2 style="margin-top:18px">🧠 Performa per Setup</h2>
+    <div class="note">
+      Mengukur hasil nyata dari paper trade yang sudah selesai. Semakin banyak sampel, semakin berguna statistiknya.
+    </div>
+    <div id="setupPerformance">
+      <div class="loading">Belum ada data setup yang selesai.</div>
+    </div>
+
     <h2 style="margin-top:16px">📌 Posisi Aktif</h2>
     <div id="paperTrades">
       <div class="loading">Belum ada paper trade.</div>
@@ -2506,6 +2514,159 @@ function renderPaperTradeCard(x, history=false){
   `;
 }
 
+function renderSetupPerformance(historyRows){
+  const target =
+  document.getElementById('setupPerformance');
+
+  if(!target) return;
+
+  const closed =
+  (historyRows || []).filter(x =>
+    ['TP2','TP','CL'].includes(x.status)
+  );
+
+  if(!closed.length){
+    target.innerHTML =
+    '<div class="loading">Belum ada data setup yang selesai.</div>';
+    return;
+  }
+
+  const groups = {};
+
+  for(const item of closed){
+    const setup =
+    String(item.setup || 'Tanpa Setup').trim() ||
+    'Tanpa Setup';
+
+    if(!groups[setup]){
+      groups[setup] = {
+        setup,
+        total:0,
+        wins:0,
+        losses:0,
+        pnlSum:0,
+        pnlCount:0,
+        scoreSum:0,
+        scoreCount:0
+      };
+    }
+
+    const g = groups[setup];
+
+    g.total += 1;
+
+    if(['TP2','TP'].includes(item.status)){
+      g.wins += 1;
+    }
+
+    if(item.status === 'CL'){
+      g.losses += 1;
+    }
+
+    const pnl =
+    Number(item.realized_pnl_pct);
+
+    if(Number.isFinite(pnl)){
+      g.pnlSum += pnl;
+      g.pnlCount += 1;
+    }
+
+    const score =
+    Number(item.scanner_score);
+
+    if(Number.isFinite(score)){
+      g.scoreSum += score;
+      g.scoreCount += 1;
+    }
+  }
+
+  const rows =
+  Object.values(groups)
+  .map(g=>{
+    const winRate =
+    g.total > 0
+    ? (g.wins / g.total) * 100
+    : null;
+
+    const avgPnl =
+    g.pnlCount > 0
+    ? g.pnlSum / g.pnlCount
+    : null;
+
+    const avgScore =
+    g.scoreCount > 0
+    ? g.scoreSum / g.scoreCount
+    : null;
+
+    return {
+      ...g,
+      winRate,
+      avgPnl,
+      avgScore
+    };
+  })
+  .sort((a,b)=>{
+    if(b.total !== a.total){
+      return b.total - a.total;
+    }
+
+    return (b.avgPnl ?? -999) - (a.avgPnl ?? -999);
+  });
+
+  target.innerHTML =
+  rows.map(x=>{
+    const pnlText =
+    x.avgPnl == null
+    ? '--'
+    : (
+        (x.avgPnl >= 0 ? '+' : '') +
+        x.avgPnl.toFixed(2) + '%'
+      );
+
+    const pnlClass =
+    x.avgPnl == null
+    ? 'yellow'
+    : x.avgPnl >= 0
+      ? 'green'
+      : 'red';
+
+    const winRateText =
+    x.winRate == null
+    ? '--'
+    : x.winRate.toFixed(1) + '%';
+
+    const confidence =
+    x.total >= 20
+    ? 'Sampel kuat'
+    : x.total >= 10
+      ? 'Sampel mulai berguna'
+      : x.total >= 5
+        ? 'Sampel masih kecil'
+        : 'Sampel sangat kecil';
+
+    return `
+      <div class="status-box">
+        <div class="status-title">
+          🧩 ${x.setup}
+        </div>
+
+        <div class="status-value">
+          Win Rate ${winRateText}
+          • <span class="${pnlClass}">AVG ${pnlText}</span>
+        </div>
+
+        <div class="small" style="margin-top:6px;line-height:1.7">
+          Selesai ${x.total}
+          • Win ${x.wins}
+          • Loss ${x.losses}<br>
+          Avg Scanner Score ${x.avgScore == null ? '--' : x.avgScore.toFixed(1)}
+          • ${confidence}
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
 function renderPaperTrades(){
   const target =
   document.getElementById('paperTrades');
@@ -2565,6 +2726,10 @@ function renderPaperTrades(){
   activeRows.filter(x =>
     x.status === 'TP1_HIT'
   ).length;
+
+  renderSetupPerformance(
+    historyRows
+  );
 
   if(summary){
     summary.textContent =

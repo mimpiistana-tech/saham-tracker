@@ -800,8 +800,38 @@ berapa persen mesin yang sudah aktif.
     <div id="paperSummary" class="note">
       Belum ada statistik.
     </div>
+
+    <div id="paperStats" class="grid" style="margin-top:10px">
+      <div class="tile">
+        <div class="tile-title">🎯 WIN RATE</div>
+        <div id="paperWinRate" class="tile-value green">--</div>
+        <div class="small">Dari trade yang sudah selesai</div>
+      </div>
+      <div class="tile">
+        <div class="tile-title">📊 AVG P/L</div>
+        <div id="paperAvgPnl" class="tile-value blue">--</div>
+        <div class="small">Rata-rata hasil trade selesai</div>
+      </div>
+      <div class="tile">
+        <div class="tile-title">✅ WIN</div>
+        <div id="paperWins" class="tile-value green">0</div>
+        <div class="small">TP / TP2</div>
+      </div>
+      <div class="tile">
+        <div class="tile-title">🛑 LOSS</div>
+        <div id="paperLosses" class="tile-value red">0</div>
+        <div class="small">Cut loss</div>
+      </div>
+    </div>
+
+    <h2 style="margin-top:16px">📌 Posisi Aktif</h2>
     <div id="paperTrades">
       <div class="loading">Belum ada paper trade.</div>
+    </div>
+
+    <h2 style="margin-top:18px">📚 Riwayat Selesai</h2>
+    <div id="paperHistory">
+      <div class="loading">Belum ada riwayat.</div>
     </div>
   </div>
 </section>
@@ -1035,8 +1065,21 @@ function closePaperTrade(id, result){
 
   if(!item) return;
 
+  const exitPrice =
+  Number(item.last_price || item.entry || 0);
+
   item.status = result;
   item.closed_at = new Date().toISOString();
+  item.exit_price = exitPrice;
+
+  item.realized_pnl_pct =
+  (
+    Number(item.entry || 0) > 0 &&
+    exitPrice > 0
+  )
+  ? ((exitPrice / Number(item.entry)) - 1) * 100
+  : null;
+
   item.monitor_note =
     result === 'TP'
     ? 'Ditutup manual sebagai TP.'
@@ -1109,7 +1152,27 @@ async function updatePaperTrade(item){
     high_since: Number(data.high_since || 0),
     low_since: Number(data.low_since || 0),
     last_checked_at: data.checked_at || null,
-    auto_source: data.source || ''
+    auto_source: data.source || '',
+    exit_price:
+      data.exit_price == null
+      ? item.exit_price
+      : Number(data.exit_price),
+    exit_time:
+      data.exit_time || item.exit_time || null,
+    realized_pnl_pct:
+      ['TP2','CL'].includes(data.state)
+      ? (
+          Number(item.entry || 0) > 0 &&
+          Number(data.exit_price || 0) > 0
+        )
+        ? (
+            (
+              Number(data.exit_price) /
+              Number(item.entry)
+            ) - 1
+          ) * 100
+        : item.realized_pnl_pct
+      : item.realized_pnl_pct
   };
 }
 
@@ -1156,108 +1219,78 @@ async function refreshAllPaperTrades(){
   renderPaperTrades();
 }
 
-function renderPaperTrades(){
-  const target =
-  document.getElementById('paperTrades');
+function renderPaperTradeCard(x, history=false){
+  const displayPnl =
+  history
+  ? x.realized_pnl_pct
+  : x.pnl_pct;
 
-  const summary =
-  document.getElementById('paperSummary');
+  const pnl =
+  displayPnl == null
+  ? '--'
+  : (
+      (Number(displayPnl) >= 0 ? '+' : '') +
+      Number(displayPnl).toFixed(2) + '%'
+    );
 
-  if(!target) return;
+  const pnlClass =
+  displayPnl == null
+  ? 'yellow'
+  : Number(displayPnl) >= 0
+    ? 'green'
+    : 'red';
 
-  const rows = getPaperTrades();
+  const isWaiting =
+  x.status === 'WAIT_ENTRY';
 
-  if(!rows.length){
-    target.innerHTML =
-    '<div class="loading">Belum ada paper trade.</div>';
+  const isOpen =
+  ['OPEN','TP1_HIT'].includes(x.status);
 
-    if(summary){
-      summary.textContent = 'Belum ada statistik.';
-    }
+  const distanceToEntry =
+  (
+    Number(x.last_price || 0) > 0 &&
+    Number(x.entry || 0) > 0
+  )
+  ? (
+      (Number(x.entry) / Number(x.last_price)) - 1
+    ) * 100
+  : null;
 
-    return;
-  }
-
-  const wins =
-  rows.filter(x =>
-    ['TP2','TP'].includes(x.status)
-  ).length;
-
-  const tp1Hits =
-  rows.filter(x =>
-    x.status === 'TP1_HIT'
-  ).length;
-
-  const losses =
-  rows.filter(x =>
-    x.status === 'CL'
-  ).length;
-
-  const active =
-  rows.filter(x =>
-    ['WAIT_ENTRY','OPEN','TP1_HIT'].includes(x.status)
-  ).length;
-
-  if(summary){
-    summary.textContent =
-    'Aktif ' + active +
-    ' • TP/TP2 ' + wins +
-    ' • TP1 Hit ' + tp1Hits +
-    ' • CL ' + losses;
-  }
-
-  target.innerHTML =
-  rows.map(x=>{
-    const pnl =
-    x.pnl_pct == null
-    ? '--'
-    : (
-        (Number(x.pnl_pct) >= 0 ? '+' : '') +
-        Number(x.pnl_pct).toFixed(2) + '%'
-      );
-
-    const pnlClass =
-    x.pnl_pct == null
-    ? 'yellow'
-    : Number(x.pnl_pct) >= 0
-      ? 'green'
-      : 'red';
-
-    const isWaiting =
-    x.status === 'WAIT_ENTRY';
-
-    const isOpen =
-    ['OPEN','TP1_HIT'].includes(x.status);
-
-    const distanceToEntry =
-    (
-      Number(x.last_price || 0) > 0 &&
-      Number(x.entry || 0) > 0
+  const entryHint =
+  isWaiting && distanceToEntry != null
+  ? (
+      ' • Jarak ke entry ' +
+      (distanceToEntry >= 0 ? '+' : '') +
+      distanceToEntry.toFixed(2) + '%'
     )
-    ? (
-        (Number(x.entry) / Number(x.last_price)) - 1
-      ) * 100
-    : null;
+  : '';
 
-    const entryHint =
-    isWaiting && distanceToEntry != null
-    ? (
-        ' • Jarak ke entry ' +
-        (distanceToEntry >= 0 ? '+' : '') +
-        distanceToEntry.toFixed(2) + '%'
-      )
-    : '';
+  const priceLine =
+  history
+  ? (
+      'Entry ' + compactNumber(x.entry) +
+      ' • Exit ' + compactNumber(x.exit_price) +
+      ' • <span class="' + pnlClass + '">' + pnl + '</span>'
+    )
+  : (
+      'Entry ' + compactNumber(x.entry) +
+      ' • Harga ' + compactNumber(x.last_price) +
+      ' • <span class="' + pnlClass + '">' + pnl + '</span>'
+    );
 
-    return `
+  const closedDate =
+  history && x.closed_at
+  ? new Date(x.closed_at).toLocaleString('id-ID')
+  : '';
+
+  return `
     <div class="status-box">
       <div class="status-title">
         ${x.ticker} • ${paperStatusLabel(x.status)}
       </div>
 
       <div class="status-value">
-        Entry ${compactNumber(x.entry)}
-        • Harga ${compactNumber(x.last_price)}
-        • <span class="${pnlClass}">${pnl}</span>
+        ${priceLine}
       </div>
 
       <div class="small" style="margin-top:6px;line-height:1.7">
@@ -1268,9 +1301,14 @@ function renderPaperTrades(){
         • Score ${Number(x.scanner_score || 0).toFixed(1)}
         ${entryHint}<br>
         ${x.monitor_note || 'Belum diperbarui.'}
+        ${closedDate ? '<br>Selesai ' + closedDate : ''}
       </div>
 
-      ${isWaiting ? `
+      ${history ? `
+        <button class="refresh" style="margin-top:9px;background:#ff7180" onclick="deletePaperTrade(${x.id})">
+          🗑️ Hapus Riwayat
+        </button>
+      ` : isWaiting ? `
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:9px">
           <button class="refresh" style="margin-top:0" onclick="refreshAllPaperTrades()">🔄 Harga</button>
           <button class="refresh" style="margin-top:0;background:#ff7180" onclick="deletePaperTrade(${x.id})">🗑️ Hapus</button>
@@ -1281,14 +1319,141 @@ function renderPaperTrades(){
           <button class="refresh" style="margin-top:0;background:#ffd166" onclick="closePaperTrade(${x.id},'TP')">✅ Tutup TP</button>
           <button class="refresh" style="margin-top:0;background:#ff7180" onclick="deletePaperTrade(${x.id})">🗑️ Hapus</button>
         </div>
-      ` : `
-        <button class="refresh" style="margin-top:9px;background:#ff7180" onclick="deletePaperTrade(${x.id})">
-          🗑️ Hapus
-        </button>
-      `}
+      ` : ''}
     </div>
-    `;
-  }).join('');
+  `;
+}
+
+function renderPaperTrades(){
+  const target =
+  document.getElementById('paperTrades');
+
+  const historyTarget =
+  document.getElementById('paperHistory');
+
+  const summary =
+  document.getElementById('paperSummary');
+
+  if(!target) return;
+
+  const rows = getPaperTrades();
+
+  const activeStatuses =
+  new Set(['WAIT_ENTRY','OPEN','TP1_HIT']);
+
+  const activeRows =
+  rows.filter(x => activeStatuses.has(x.status));
+
+  const historyRows =
+  rows.filter(x => !activeStatuses.has(x.status));
+
+  const wins =
+  historyRows.filter(x =>
+    ['TP2','TP'].includes(x.status)
+  ).length;
+
+  const losses =
+  historyRows.filter(x =>
+    x.status === 'CL'
+  ).length;
+
+  const closedCount =
+  wins + losses;
+
+  const realizedRows =
+  historyRows.filter(x =>
+    x.realized_pnl_pct != null &&
+    Number.isFinite(Number(x.realized_pnl_pct))
+  );
+
+  const avgPnl =
+  realizedRows.length
+  ? realizedRows.reduce(
+      (sum,x)=>sum + Number(x.realized_pnl_pct),
+      0
+    ) / realizedRows.length
+  : null;
+
+  const winRate =
+  closedCount > 0
+  ? (wins / closedCount) * 100
+  : null;
+
+  const tp1Hits =
+  activeRows.filter(x =>
+    x.status === 'TP1_HIT'
+  ).length;
+
+  if(summary){
+    summary.textContent =
+    'Aktif ' + activeRows.length +
+    ' • Selesai ' + closedCount +
+    ' • TP1 Hit ' + tp1Hits +
+    ' • Total data ' + rows.length;
+  }
+
+  const winRateEl =
+  document.getElementById('paperWinRate');
+
+  const avgPnlEl =
+  document.getElementById('paperAvgPnl');
+
+  const winsEl =
+  document.getElementById('paperWins');
+
+  const lossesEl =
+  document.getElementById('paperLosses');
+
+  if(winRateEl){
+    winRateEl.textContent =
+    winRate == null
+    ? '--'
+    : winRate.toFixed(1) + '%';
+  }
+
+  if(avgPnlEl){
+    avgPnlEl.textContent =
+    avgPnl == null
+    ? '--'
+    : (
+        (avgPnl >= 0 ? '+' : '') +
+        avgPnl.toFixed(2) + '%'
+      );
+
+    avgPnlEl.className =
+    'tile-value ' +
+    (
+      avgPnl == null
+      ? 'blue'
+      : avgPnl >= 0
+        ? 'green'
+        : 'red'
+    );
+  }
+
+  if(winsEl){
+    winsEl.textContent = wins;
+  }
+
+  if(lossesEl){
+    lossesEl.textContent = losses;
+  }
+
+  target.innerHTML =
+  activeRows.length
+  ? activeRows.map(x =>
+      renderPaperTradeCard(x,false)
+    ).join('')
+  : '<div class="loading">Tidak ada posisi aktif.</div>';
+
+  if(historyTarget){
+    historyTarget.innerHTML =
+    historyRows.length
+    ? historyRows.map(x =>
+        renderPaperTradeCard(x,true)
+      ).join('')
+    : '<div class="loading">Belum ada riwayat selesai.</div>';
+  }
 }
 
 function openTab(id,btn){

@@ -1,7 +1,8 @@
 const DB_NAME = 'stockradar_background';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const PAPER_STORE = 'paper_trades';
 const ALERT_STORE = 'background_alerts';
+const META_STORE = 'monitor_meta';
 const API_BASE = 'https://saham-tracker-api.onrender.com';
 
 function openDb(){
@@ -17,6 +18,10 @@ function openDb(){
 
       if(!db.objectStoreNames.contains(ALERT_STORE)){
         db.createObjectStore(ALERT_STORE,{keyPath:'event_key'});
+      }
+
+      if(!db.objectStoreNames.contains(META_STORE)){
+        db.createObjectStore(META_STORE,{keyPath:'key'});
       }
     };
 
@@ -183,20 +188,55 @@ async function checkOne(item){
   await putOne(PAPER_STORE,current);
 }
 
-async function checkAllPaperTrades(){
+async function checkAllPaperTrades(trigger='background'){
+  const startedAt = Date.now();
+
+  await putOne(META_STORE,{
+    key:'health',
+    state:'RUNNING',
+    trigger,
+    last_started_at:startedAt,
+    last_finished_at:null,
+    checked:0,
+    failures:0,
+    last_error:null
+  });
+
   const rows = await getAll(PAPER_STORE);
 
   const active = rows.filter(x =>
     ['WAIT_ENTRY','OPEN','TP1_HIT'].includes(x.status)
   );
 
+  let checked = 0;
+  let failures = 0;
+  let lastError = null;
+
   for(const item of active){
     try{
       await checkOne(item);
+      checked += 1;
     }catch(e){
+      failures += 1;
+      lastError = String(e?.message || e);
       console.log('Background paper check failed',item.ticker,e);
     }
   }
+
+  const finishedAt = Date.now();
+
+  await putOne(META_STORE,{
+    key:'health',
+    state:failures > 0 ? 'DEGRADED' : 'OK',
+    trigger,
+    last_started_at:startedAt,
+    last_finished_at:finishedAt,
+    checked,
+    failures,
+    active_positions:active.length,
+    duration_ms:finishedAt - startedAt,
+    last_error:lastError
+  });
 }
 
 self.addEventListener('install',event=>{
@@ -209,19 +249,19 @@ self.addEventListener('activate',event=>{
 
 self.addEventListener('periodicsync',event=>{
   if(event.tag === 'stockradar-paper-monitor'){
-    event.waitUntil(checkAllPaperTrades());
+    event.waitUntil(checkAllPaperTrades('periodic-sync'));
   }
 });
 
 self.addEventListener('sync',event=>{
   if(event.tag === 'stockradar-paper-sync'){
-    event.waitUntil(checkAllPaperTrades());
+    event.waitUntil(checkAllPaperTrades('background-sync'));
   }
 });
 
 self.addEventListener('message',event=>{
   if(event.data?.type === 'CHECK_PAPER_NOW'){
-    event.waitUntil(checkAllPaperTrades());
+    event.waitUntil(checkAllPaperTrades('manual-message'));
   }
 });
 

@@ -2461,6 +2461,601 @@ def historical_walk_forward():
     })
 
 
+
+def get_yahoo_symbol_history(symbol, date_to, calendar_days=1000):
+    try:
+        end_date = datetime.strptime(
+            date_to,
+            "%Y-%m-%d",
+        ).date()
+    except ValueError:
+        return {
+            "success": False,
+            "error": "Format tanggal harus YYYY-MM-DD",
+        }, 400, "MISS"
+
+    calendar_days = max(
+        240,
+        min(int(calendar_days), 1800),
+    )
+
+    start_date = end_date - timedelta(
+        days=calendar_days
+    )
+
+    cache_key = (
+        f"generic_ohlcv_{symbol}_"
+        f"{start_date.isoformat()}_"
+        f"{end_date.isoformat()}"
+    )
+
+    cached, cache_state = cache_get(cache_key)
+
+    if cached and cache_state == "HIT":
+        return (
+            cached["data"],
+            cached["status"],
+            "HIT",
+        )
+
+    period1 = int(
+        datetime.combine(
+            start_date,
+            datetime.min.time(),
+        ).timestamp()
+    )
+
+    period2 = int(
+        datetime.combine(
+            end_date + timedelta(days=1),
+            datetime.min.time(),
+        ).timestamp()
+    )
+
+    try:
+        response = requests.get(
+            f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}",
+            params={
+                "period1": period1,
+                "period2": period2,
+                "interval": "1d",
+                "events": "history",
+                "includeAdjustedClose": "true",
+            },
+            headers={
+                "User-Agent": "Mozilla/5.0 StockRadar/1.0",
+                "accept": "application/json",
+            },
+            timeout=25,
+        )
+
+        if response.status_code != 200:
+            return {
+                "success": False,
+                "error": (
+                    f"Yahoo {symbol} HTTP "
+                    f"{response.status_code}"
+                ),
+            }, response.status_code, "MISS"
+
+        payload = response.json()
+        chart = payload.get("chart") or {}
+        results = chart.get("result") or []
+
+        if not results:
+            return {
+                "success": False,
+                "error": (
+                    f"Yahoo tidak menemukan data "
+                    f"{symbol}"
+                ),
+            }, 404, "MISS"
+
+        result = results[0]
+        timestamps = result.get("timestamp") or []
+        quote_list = (
+            (result.get("indicators") or {})
+            .get("quote") or [{}]
+        )
+        quote = (
+            quote_list[0]
+            if quote_list
+            else {}
+        )
+
+        closes = quote.get("close") or []
+        highs = quote.get("high") or []
+        lows = quote.get("low") or []
+        opens = quote.get("open") or []
+        volumes = quote.get("volume") or []
+
+        rows = []
+
+        for i, ts in enumerate(timestamps):
+            close = (
+                closes[i]
+                if i < len(closes)
+                else None
+            )
+
+            if close is None:
+                continue
+
+            rows.append({
+                "date": (
+                    datetime.utcfromtimestamp(ts)
+                    .date()
+                    .isoformat()
+                ),
+                "open": (
+                    opens[i]
+                    if i < len(opens)
+                    else None
+                ),
+                "high": (
+                    highs[i]
+                    if i < len(highs)
+                    else None
+                ),
+                "low": (
+                    lows[i]
+                    if i < len(lows)
+                    else None
+                ),
+                "close": close,
+                "volume": (
+                    volumes[i]
+                    if i < len(volumes)
+                    else None
+                ),
+            })
+
+        data = {
+            "success": True,
+            "source": "yahoo_finance",
+            "symbol": symbol,
+            "data": rows,
+        }
+
+        cache_put(
+            cache_key,
+            data,
+            200,
+        )
+
+        return data, 200, "MISS"
+
+    except Exception as e:
+        return {
+            "success": False,
+            "error": (
+                f"Yahoo {symbol} error: {e}"
+            ),
+        }, 500, "MISS"
+
+
+def build_market_regime_map(rows):
+    clean = [
+        x for x in rows
+        if x.get("date")
+        and x.get("close") is not None
+    ]
+
+    closes = [
+        float(x.get("close") or 0)
+        for x in clean
+    ]
+
+    regimes = {}
+
+    for i, row in enumerate(clean):
+        if i < 199:
+            regimes[row["date"]] = "Unknown"
+            continue
+
+        ma50 = (
+            sum(closes[i - 49:i + 1])
+            / 50.0
+        )
+
+        ma200 = (
+            sum(closes[i - 199:i + 1])
+            / 200.0
+        )
+
+        close = closes[i]
+
+        ma50_prev = None
+
+        if i >= 219:
+            ma50_prev = (
+                sum(closes[i - 69:i - 19])
+                / 50.0
+            )
+
+        slope_up = (
+            ma50_prev is None
+            or ma50 >= ma50_prev
+        )
+
+        slope_down = (
+            ma50_prev is None
+            or ma50 <= ma50_prev
+        )
+
+        if (
+            close > ma50
+            and ma50 > ma200
+            and slope_up
+        ):
+            regime = "Bullish"
+        elif (
+            close < ma50
+            and ma50 < ma200
+            and slope_down
+        ):
+            regime = "Bearish"
+        else:
+            regime = "Sideways"
+
+        regimes[row["date"]] = regime
+
+    return regimes
+
+
+def annotate_trades_with_regime(
+    trades,
+    regime_map,
+):
+    output = []
+
+    for trade in trades:
+        item = dict(trade)
+
+        signal_date = (
+            item.get("signal_date") or ""
+        )
+
+        item["market_regime"] = (
+            regime_map.get(
+                signal_date,
+                "Unknown",
+            )
+        )
+
+        output.append(item)
+
+    return output
+
+
+@app.route("/api/market-regime-validation")
+def market_regime_validation():
+    raw_tickers = request.args.get(
+        "tickers",
+        "",
+    )
+    date_to = request.args.get("to")
+
+    try:
+        lookback_sessions = int(
+            request.args.get(
+                "sessions",
+                "300",
+            )
+        )
+        max_signals = int(
+            request.args.get(
+                "max_signals",
+                "30",
+            )
+        )
+        entry_wait = int(
+            request.args.get(
+                "entry_wait",
+                "5",
+            )
+        )
+        max_hold = int(
+            request.args.get(
+                "max_hold",
+                "20",
+            )
+        )
+    except ValueError:
+        return jsonify({
+            "success": False,
+            "error": (
+                "Parameter regime validation "
+                "harus berupa angka"
+            ),
+        }), 400
+
+    if not date_to:
+        return jsonify({
+            "success": False,
+            "error": "Parameter to wajib diisi",
+        }), 400
+
+    try:
+        datetime.strptime(
+            date_to,
+            "%Y-%m-%d",
+        )
+    except ValueError:
+        return jsonify({
+            "success": False,
+            "error": (
+                "Format tanggal harus YYYY-MM-DD"
+            ),
+        }), 400
+
+    requested = []
+
+    for part in (
+        raw_tickers
+        .replace(";", ",")
+        .split(",")
+    ):
+        ticker = part.strip().upper()
+
+        if (
+            ticker
+            and ticker not in requested
+        ):
+            requested.append(ticker)
+
+    if not requested:
+        requested = [
+            "BBRI", "BBCA", "BMRI",
+            "TLKM", "ASII", "UNTR",
+            "PTBA", "ANTM", "SMDR",
+            "PWON",
+        ]
+
+    requested = requested[:20]
+
+    lookback_sessions = max(
+        120,
+        min(lookback_sessions, 600),
+    )
+
+    max_signals = max(
+        10,
+        min(max_signals, 50),
+    )
+
+    entry_wait = max(
+        1,
+        min(entry_wait, 10),
+    )
+
+    max_hold = max(
+        3,
+        min(max_hold, 60),
+    )
+
+    calendar_days = min(
+        1800,
+        max(
+            800,
+            int(lookback_sessions * 2.2)
+            + 500,
+        ),
+    )
+
+    benchmark_data, benchmark_status, benchmark_cache = (
+        get_yahoo_symbol_history(
+            "^JKSE",
+            date_to,
+            calendar_days,
+        )
+    )
+
+    if benchmark_status != 200:
+        return jsonify({
+            "success": False,
+            "error": benchmark_data.get(
+                "error",
+                "Gagal mengambil benchmark IHSG",
+            ),
+        }), benchmark_status
+
+    benchmark_rows = (
+        benchmark_data.get("data") or []
+    )
+
+    regime_map = build_market_regime_map(
+        benchmark_rows
+    )
+
+    results = []
+
+    with ThreadPoolExecutor(
+        max_workers=4
+    ) as executor:
+        futures = {
+            executor.submit(
+                collect_ab_replay_for_ticker,
+                ticker,
+                date_to,
+                lookback_sessions,
+                max_signals,
+                entry_wait,
+                max_hold,
+            ): ticker
+            for ticker in requested
+        }
+
+        for future in as_completed(futures):
+            ticker = futures[future]
+
+            try:
+                result = future.result()
+            except Exception as e:
+                result = {
+                    "success": False,
+                    "ticker": ticker,
+                    "error": str(e),
+                }
+
+            results.append(result)
+
+    successful = [
+        x for x in results
+        if x.get("success")
+    ]
+
+    failed = [
+        x for x in results
+        if not x.get("success")
+    ]
+
+    combined = {
+        "A": [],
+        "B": [],
+        "C": [],
+    }
+
+    for result in successful:
+        for mode in combined:
+            combined[mode].extend(
+                result.get(
+                    "models",
+                    {},
+                ).get(
+                    mode,
+                    [],
+                )
+            )
+
+    model_output = {}
+
+    for mode, trades in combined.items():
+        annotated = annotate_trades_with_regime(
+            trades,
+            regime_map,
+        )
+
+        regime_summary = {}
+        regime_setup_summary = {}
+
+        for regime in [
+            "Bullish",
+            "Sideways",
+            "Bearish",
+            "Unknown",
+        ]:
+            subset = [
+                x for x in annotated
+                if x.get("market_regime")
+                == regime
+            ]
+
+            if not subset:
+                continue
+
+            regime_summary[regime] = (
+                summarize_historical_trades(
+                    subset
+                )
+            )
+
+            regime_setup_summary[regime] = {}
+
+            for setup in [
+                "Watch Pullback",
+                "Momentum",
+                "Early Watch",
+            ]:
+                setup_subset = [
+                    x for x in subset
+                    if x.get("setup") == setup
+                ]
+
+                if setup_subset:
+                    regime_setup_summary[
+                        regime
+                    ][setup] = (
+                        summarize_historical_trades(
+                            setup_subset
+                        )
+                    )
+
+        model_output[mode] = {
+            "summary": (
+                summarize_historical_trades(
+                    annotated
+                )
+            ),
+            "regime_summary": regime_summary,
+            "regime_setup_summary": (
+                regime_setup_summary
+            ),
+        }
+
+    benchmark_regime_counts = {
+        "Bullish": 0,
+        "Sideways": 0,
+        "Bearish": 0,
+        "Unknown": 0,
+    }
+
+    for regime in regime_map.values():
+        benchmark_regime_counts[regime] = (
+            benchmark_regime_counts.get(
+                regime,
+                0,
+            ) + 1
+        )
+
+    return jsonify({
+        "success": True,
+        "date_to": date_to,
+        "benchmark": {
+            "symbol": "^JKSE",
+            "name": "IHSG",
+            "cache": benchmark_cache,
+            "method": (
+                "Bullish: close > MA50 > MA200 "
+                "dan MA50 tidak menurun; "
+                "Bearish: close < MA50 < MA200 "
+                "dan MA50 tidak naik; "
+                "selain itu Sideways."
+            ),
+            "regime_days": (
+                benchmark_regime_counts
+            ),
+        },
+        "settings": {
+            "lookback_sessions": (
+                lookback_sessions
+            ),
+            "max_signals_per_ticker": (
+                max_signals
+            ),
+            "entry_wait_sessions": (
+                entry_wait
+            ),
+            "max_hold_sessions": max_hold,
+            "ticker_count": len(requested),
+        },
+        "successful_tickers": (
+            len(successful)
+        ),
+        "failed_tickers": len(failed),
+        "failed": failed,
+        "models": model_output,
+        "assumptions": [
+            "Regime ditentukan dari IHSG (^JKSE) pada tanggal signal.",
+            "Regime hanya label historis untuk validasi, bukan prediksi pasar berikutnya.",
+            "Signal dan entry A/B/C sama; perbedaan antar model hanya exit.",
+            "Broker IndexAlpha tidak dipakai.",
+            "Biaya transaksi dan slippage belum dimasukkan.",
+            "Market Regime Validation tidak menggantikan forward Paper Trade.",
+        ],
+    })
+
+
 @app.route("/api/paper-check")
 def paper_check():
     ticker = request.args.get("ticker", "").upper().strip()

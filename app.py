@@ -2013,6 +2013,321 @@ def historical_exit_ab():
     })
 
 
+
+def walk_forward_status(train_summary, test_summary):
+    train_n = int(train_summary.get("trades") or 0)
+    test_n = int(test_summary.get("trades") or 0)
+
+    train_exp = train_summary.get("expectancy")
+    test_exp = test_summary.get("expectancy")
+    test_pf = test_summary.get("profit_factor")
+
+    if train_n < 20 or test_n < 10:
+        return {
+            "level": "EARLY",
+            "label": "Sampel holdout masih kecil",
+            "class": "yellow",
+        }
+
+    if (
+        train_exp is not None
+        and test_exp is not None
+        and float(train_exp) > 0
+        and float(test_exp) > 0
+        and (
+            test_pf is None
+            or float(test_pf) >= 1.0
+        )
+    ):
+        return {
+            "level": "POSITIVE",
+            "label": "Holdout positif",
+            "class": "green",
+        }
+
+    if (
+        train_exp is not None
+        and float(train_exp) > 0
+        and test_exp is not None
+        and float(test_exp) <= 0
+    ):
+        return {
+            "level": "DEGRADED",
+            "label": "Degradasi di holdout",
+            "class": "red",
+        }
+
+    if (
+        train_exp is not None
+        and test_exp is not None
+        and float(train_exp) <= 0
+        and float(test_exp) > 0
+    ):
+        return {
+            "level": "MIXED",
+            "label": "Hasil campuran",
+            "class": "yellow",
+        }
+
+    return {
+        "level": "NEGATIVE",
+        "label": "Belum positif lintas periode",
+        "class": "red",
+    }
+
+
+@app.route("/api/historical-walk-forward")
+def historical_walk_forward():
+    raw_tickers = request.args.get("tickers", "")
+    date_to = request.args.get("to")
+
+    try:
+        lookback_sessions = int(
+            request.args.get("sessions", "600")
+        )
+        max_signals = int(
+            request.args.get("max_signals", "50")
+        )
+        entry_wait = int(
+            request.args.get("entry_wait", "5")
+        )
+        max_hold = int(
+            request.args.get("max_hold", "20")
+        )
+        train_pct = int(
+            request.args.get("train_pct", "70")
+        )
+    except ValueError:
+        return jsonify({
+            "success": False,
+            "error": "Parameter walk-forward harus berupa angka",
+        }), 400
+
+    if not date_to:
+        return jsonify({
+            "success": False,
+            "error": "Parameter to wajib diisi",
+        }), 400
+
+    try:
+        datetime.strptime(date_to, "%Y-%m-%d")
+    except ValueError:
+        return jsonify({
+            "success": False,
+            "error": "Format tanggal harus YYYY-MM-DD",
+        }), 400
+
+    requested = []
+
+    for part in raw_tickers.replace(";", ",").split(","):
+        ticker = part.strip().upper()
+
+        if ticker and ticker not in requested:
+            requested.append(ticker)
+
+    if not requested:
+        requested = [
+            "BBRI", "BBCA", "BMRI", "TLKM", "ASII",
+            "UNTR", "PTBA", "ANTM", "SMDR", "PWON",
+        ]
+
+    requested = requested[:20]
+
+    lookback_sessions = max(
+        120,
+        min(lookback_sessions, 600),
+    )
+    max_signals = max(
+        10,
+        min(max_signals, 50),
+    )
+    entry_wait = max(
+        1,
+        min(entry_wait, 10),
+    )
+    max_hold = max(
+        3,
+        min(max_hold, 60),
+    )
+    train_pct = max(
+        50,
+        min(train_pct, 85),
+    )
+
+    results = []
+
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        futures = {
+            executor.submit(
+                collect_ab_replay_for_ticker,
+                ticker,
+                date_to,
+                lookback_sessions,
+                max_signals,
+                entry_wait,
+                max_hold,
+            ): ticker
+            for ticker in requested
+        }
+
+        for future in as_completed(futures):
+            ticker = futures[future]
+
+            try:
+                result = future.result()
+            except Exception as e:
+                result = {
+                    "success": False,
+                    "ticker": ticker,
+                    "error": str(e),
+                }
+
+            results.append(result)
+
+    successful = [
+        x for x in results
+        if x.get("success")
+    ]
+
+    failed = [
+        x for x in results
+        if not x.get("success")
+    ]
+
+    combined = {
+        "A": [],
+        "B": [],
+        "C": [],
+    }
+
+    for result in successful:
+        for mode in combined:
+            combined[mode].extend(
+                result.get("models", {}).get(mode, [])
+            )
+
+    for mode in combined:
+        combined[mode].sort(
+            key=lambda x: (
+                x.get("signal_date") or "",
+                x.get("ticker") or "",
+            )
+        )
+
+    reference = combined["A"]
+
+    if len(reference) < 20:
+        return jsonify({
+            "success": False,
+            "error": (
+                "Sampel replay terlalu kecil untuk walk-forward. "
+                "Tambah sesi/ticker."
+            ),
+            "trades": len(reference),
+        }), 422
+
+    split_index = int(
+        len(reference) * (train_pct / 100.0)
+    )
+
+    split_index = max(
+        1,
+        min(split_index, len(reference) - 1),
+    )
+
+    cutoff_signal_date = (
+        reference[split_index - 1].get("signal_date")
+    )
+
+    labels = {
+        "A": "Full position: TP2 atau CL",
+        "B": "50% TP1 + 50% runner ke TP2/CL",
+        "C": "50% TP1 + runner stop breakeven",
+    }
+
+    models = {}
+
+    for mode, trades in combined.items():
+        train = [
+            x for x in trades
+            if (x.get("signal_date") or "") <= cutoff_signal_date
+        ]
+
+        test = [
+            x for x in trades
+            if (x.get("signal_date") or "") > cutoff_signal_date
+        ]
+
+        train_summary = summarize_historical_trades(train)
+        test_summary = summarize_historical_trades(test)
+
+        setup_split = {}
+
+        for setup in [
+            "Momentum",
+            "Watch Pullback",
+            "Early Watch",
+        ]:
+            setup_train = [
+                x for x in train
+                if x.get("setup") == setup
+            ]
+
+            setup_test = [
+                x for x in test
+                if x.get("setup") == setup
+            ]
+
+            if setup_train or setup_test:
+                setup_split[setup] = {
+                    "train": summarize_historical_trades(
+                        setup_train
+                    ),
+                    "test": summarize_historical_trades(
+                        setup_test
+                    ),
+                }
+
+        models[mode] = {
+            "label": labels[mode],
+            "status": walk_forward_status(
+                train_summary,
+                test_summary,
+            ),
+            "train": train_summary,
+            "test": test_summary,
+            "setup_split": setup_split,
+        }
+
+    return jsonify({
+        "success": True,
+        "date_to": date_to,
+        "source": "Yahoo Finance daily OHLCV",
+        "settings": {
+            "lookback_sessions": lookback_sessions,
+            "max_signals_per_ticker": max_signals,
+            "entry_wait_sessions": entry_wait,
+            "max_hold_sessions": max_hold,
+            "ticker_count": len(requested),
+            "train_pct": train_pct,
+            "test_pct": 100 - train_pct,
+            "cutoff_signal_date": cutoff_signal_date,
+        },
+        "successful_tickers": len(successful),
+        "failed_tickers": len(failed),
+        "failed": failed,
+        "models": models,
+        "assumptions": [
+            "Split dibuat kronologis: periode lama untuk development, periode terbaru sebagai holdout.",
+            "Signal dan entry tiap model A/B/C tetap sama; yang dibandingkan hanya exit.",
+            "Holdout tidak dipakai untuk mengubah aturan selama pengujian.",
+            "Broker IndexAlpha tidak dipakai.",
+            "Biaya transaksi dan slippage belum dimasukkan.",
+            "Walk-forward historis tetap tidak menggantikan forward Paper Trade.",
+        ],
+    })
+
+
 @app.route("/api/paper-check")
 def paper_check():
     ticker = request.args.get("ticker", "").upper().strip()

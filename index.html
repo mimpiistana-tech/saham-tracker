@@ -781,7 +781,7 @@ berapa persen mesin yang sudah aktif.
   </div>
 
   <div class="card">
-    <h2>🏆 Kandidat Teratas</h2>
+    <h2>🏆 Hasil Scanner</h2>
     <div id="scannerResults">
       <div class="loading">Belum discan.</div>
     </div>
@@ -1340,6 +1340,9 @@ async function runScanner(){
     ? `
       <div class="note" style="font-weight:800;margin-top:14px">
         ⭐ TOP 3 PILIHAN RADAR
+        <div class="small" style="margin-top:4px">
+          Kandidat utama tidak diulang lagi di daftar bawah.
+        </div>
       </div>
       ${topPicks.map((x)=>`
         <div class="status-box">
@@ -1364,11 +1367,20 @@ async function runScanner(){
     `
     : '';
 
+    const topTickers = new Set(
+      topPicks.map(x => x.ticker)
+    );
+
+    const withoutTop3 = (rows) =>
+      (rows || []).filter(
+        x => !topTickers.has(x.ticker)
+      );
+
     const sections = [
-      ['🔥 Momentum', groups.momentum || []],
-      ['🟢 Watch Pullback', groups.pullback || []],
-      ['🟡 Early Watch', groups.early || []],
-      ['⚪ Neutral', groups.neutral || []],
+      ['🔥 Momentum Lainnya', withoutTop3(groups.momentum)],
+      ['🟢 Watch Pullback Lainnya', withoutTop3(groups.pullback)],
+      ['🟡 Early Watch Lainnya', withoutTop3(groups.early)],
+      ['⚪ Neutral', withoutTop3(groups.neutral)],
     ];
 
     const renderRows = (rows) =>

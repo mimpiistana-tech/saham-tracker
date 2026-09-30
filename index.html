@@ -1334,6 +1334,35 @@ async function runScanner(){
 
     const data = await response.json();
     const groups = data.groups || {};
+    const topPicks = data.top_picks || [];
+
+    const topPicksHtml = topPicks.length
+    ? `
+      <div class="note" style="font-weight:800;margin-top:14px">
+        ⭐ TOP 3 PILIHAN RADAR
+      </div>
+      ${topPicks.map((x)=>`
+        <div class="status-box">
+          <div class="status-title">
+            #${x.rank} • ${x.ticker} • Priority ${x.priority}
+          </div>
+          <div class="status-value">
+            Scanner Score ${Number(x.score).toFixed(1)}
+          </div>
+          <div class="small" style="margin-top:6px;line-height:1.6">
+            ${x.reason}<br>
+            Harga ${compactNumber(x.close)}
+            • Area entry awal ${compactNumber(x.entry_low)}-${compactNumber(x.entry_high)}
+          </div>
+          <button class="refresh"
+            style="margin-top:9px"
+            onclick="analyzeCandidate('${x.ticker}')">
+            Analisa Full ${x.ticker}
+          </button>
+        </div>
+      `).join('')}
+    `
+    : '';
 
     const sections = [
       ['🔥 Momentum', groups.momentum || []],
@@ -1376,7 +1405,8 @@ async function runScanner(){
     `).join('');
 
     target.innerHTML =
-    html || '<div class="note">Belum ada kandidat yang lolos filter.</div>';
+    (topPicksHtml + html) ||
+    '<div class="note">Belum ada kandidat yang lolos filter.</div>';
 
   }catch(error){
     target.innerHTML =

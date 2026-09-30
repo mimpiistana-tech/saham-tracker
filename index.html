@@ -888,11 +888,75 @@ function openPaperTrades(btn){
   });
 }
 
+function normalizePaperTrades(rows){
+  const activeStatuses =
+  new Set(['WAIT_ENTRY','OPEN','TP1_HIT']);
+
+  const sorted =
+  [...(Array.isArray(rows) ? rows : [])]
+  .sort((a,b)=>{
+    const ta =
+    Number(a.created_ts || 0) ||
+    new Date(a.created_at || 0).getTime() / 1000;
+
+    const tb =
+    Number(b.created_ts || 0) ||
+    new Date(b.created_at || 0).getTime() / 1000;
+
+    return ta - tb;
+  });
+
+  const activeTickerSeen =
+  new Set();
+
+  const cleaned = [];
+
+  for(const item of sorted){
+    const status =
+    item.status || 'WAIT_ENTRY';
+
+    if(activeStatuses.has(status)){
+      if(activeTickerSeen.has(item.ticker)){
+        continue;
+      }
+
+      activeTickerSeen.add(item.ticker);
+    }
+
+    cleaned.push(item);
+  }
+
+  return cleaned.sort((a,b)=>{
+    const ta =
+    Number(a.created_ts || 0) ||
+    new Date(a.created_at || 0).getTime() / 1000;
+
+    const tb =
+    Number(b.created_ts || 0) ||
+    new Date(b.created_at || 0).getTime() / 1000;
+
+    return tb - ta;
+  });
+}
+
 function getPaperTrades(){
   try{
-    return JSON.parse(
+    const raw =
+    JSON.parse(
       localStorage.getItem('stockradar_paper_trades') || '[]'
     );
+
+    const cleaned =
+    normalizePaperTrades(raw);
+
+    if(JSON.stringify(raw) !== JSON.stringify(cleaned)){
+      localStorage.setItem(
+        'stockradar_paper_trades',
+        JSON.stringify(cleaned)
+      );
+    }
+
+    return cleaned;
   }catch(e){
     return [];
   }
@@ -915,8 +979,13 @@ function addPaperTrade(item){
 
   const rows = getPaperTrades();
 
+  const activeStatuses =
+  new Set(['WAIT_ENTRY','OPEN','TP1_HIT']);
+
   const exists = rows.some(
-    x => x.ticker === item.ticker && x.status === 'OPEN'
+    x =>
+      x.ticker === item.ticker &&
+      activeStatuses.has(x.status)
   );
 
   const paperNav =

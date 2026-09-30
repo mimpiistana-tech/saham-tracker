@@ -912,8 +912,15 @@ function addPaperTrade(item){
     x => x.ticker === item.ticker && x.status === 'OPEN'
   );
 
+  const paperNav =
+  Array.from(
+    document.querySelectorAll('.nav-item')
+  ).find(x => x.textContent.includes('Paper'));
+
   if(exists){
-    alert(item.ticker + ' sudah ada sebagai paper trade aktif.');
+    if(paperNav){
+      openPaperTrades(paperNav);
+    }
     return;
   }
 
@@ -932,7 +939,12 @@ function addPaperTrade(item){
   });
 
   savePaperTrades(rows);
-  alert('Paper trade ' + item.ticker + ' disimpan.');
+
+  if(paperNav){
+    openPaperTrades(paperNav);
+  }else{
+    renderPaperTrades();
+  }
 }
 
 function closePaperTrade(id, result){

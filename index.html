@@ -1225,7 +1225,7 @@ function updateNotificationStatus(){
   }
 }
 
-async async function requestStockRadarNotifications(){
+async function requestStockRadarNotifications(){
   if(!('Notification' in window)){
     updateNotificationStatus();
     return;

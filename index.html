@@ -56,6 +56,17 @@ header{
   border-radius:20px;
 }
 
+.online.quota-shield{
+  background:#4a3a12;
+  color:#ffd166;
+  border:1px solid #7a641d;
+}
+
+.online.error{
+  background:#401d25;
+  color:#ff8b96;
+}
+
 .card{
   margin:11px 14px;
   padding:15px;
@@ -2473,10 +2484,19 @@ function useRadarCache(
   document.getElementById('apiStatus');
 
   if(status){
-    status.textContent =
+    const badgeText =
     fresh
     ? statusText
     : '● Cache Lama';
+
+    status.textContent =
+    badgeText;
+
+    status.className =
+    String(badgeText).includes('Quota Shield') ||
+    getQuotaShield().active
+    ? 'online quota-shield'
+    : 'online';
   }
 
   renderPaperTrades();
@@ -5441,8 +5461,11 @@ async function analyzeCandidate(ticker){
     if(status){
       status.textContent =
       usedAnyCache
-      ? '● Cache • Quota Shield'
-      : '● Quota Shield';
+      ? '🛡️ Cache • Shield'
+      : '🛡️ Quota Shield';
+
+      status.className =
+      'online quota-shield';
     }
 
     if(!usedAnyCache){
@@ -5466,12 +5489,24 @@ function showError(message){
   document
   .getElementById('apiStatus');
 
-  status.textContent =
-  '● API Error';
+  const shield =
+  getQuotaShield();
 
-  status.className =
-  'online error';
+  if(status){
+    if(shield.active){
+      status.textContent =
+      '🛡️ Quota Shield';
 
+      status.className =
+      'online quota-shield';
+    }else{
+      status.textContent =
+      '● API Error';
+
+      status.className =
+      'online error';
+    }
+  }
 
   document
   .getElementById('radarLabel')
@@ -5691,7 +5726,10 @@ encodeURIComponent(date),
 
         if(status){
           status.textContent =
-          '● Cache • API Limit';
+          '🛡️ Cache • Shield';
+
+          status.className =
+          'online quota-shield';
         }
       }else{
         showError(

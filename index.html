@@ -2241,6 +2241,101 @@ function savePaperTrades(rows){
   syncPaperTradesToBackground(rows);
 }
 
+function addPaperTradesBatch(items){
+  const candidates =
+  Array.isArray(items)
+  ? items.slice(0,3)
+  : [];
+
+  if(!candidates.length){
+    alert('Belum ada kandidat TOP 3.');
+    return;
+  }
+
+  const rows =
+  getPaperTrades();
+
+  const activeStatuses =
+  new Set(['WAIT_ENTRY','OPEN','TP1_HIT']);
+
+  const activeTickers =
+  new Set(
+    rows
+    .filter(x => activeStatuses.has(x.status))
+    .map(x => x.ticker)
+  );
+
+  let added = 0;
+  let skipped = 0;
+  let unavailable = 0;
+
+  candidates.forEach((item,index)=>{
+    const plan =
+    item.paper_plan || {};
+
+    if(!plan.entry){
+      unavailable += 1;
+      return;
+    }
+
+    if(activeTickers.has(item.ticker)){
+      skipped += 1;
+      return;
+    }
+
+    const createdAt =
+    new Date(Date.now() + index);
+
+    rows.unshift({
+      id: Date.now() + index,
+      ticker: item.ticker,
+      entry: Number(plan.entry),
+      tp1: Number(plan.tp1),
+      tp2: Number(plan.tp2),
+      cut_loss: Number(plan.cut_loss),
+      status: 'WAIT_ENTRY',
+      setup: item.setup || '',
+      scanner_score: Number(item.score || 0),
+      created_at: createdAt.toISOString(),
+      created_ts: Math.floor(createdAt.getTime() / 1000),
+      source: plan.source || 'scanner_technical_only',
+      last_price: Number(item.close || 0),
+      pnl_pct: null,
+      batch_tag: 'TOP3',
+      scanner_rank: Number(item.rank || index + 1),
+      monitor_note: 'Menunggu harga masuk ke area entry.'
+    });
+
+    activeTickers.add(item.ticker);
+    added += 1;
+  });
+
+  savePaperTrades(rows);
+
+  const status =
+  document.getElementById('batchPaperStatus');
+
+  if(status){
+    status.textContent =
+    'TOP 3 → ditambahkan ' + added +
+    ' • sudah aktif ' + skipped +
+    ' • plan belum tersedia ' + unavailable;
+  }
+
+  const paperNav =
+  Array.from(
+    document.querySelectorAll('.nav-item')
+  ).find(x => x.textContent.includes('Paper'));
+
+  if(paperNav){
+    setTimeout(()=>{
+      openPaperTrades(paperNav);
+    },350);
+  }else{
+    renderPaperTrades();
+  }
+}
+
 function addPaperTrade(item){
   const plan = item.paper_plan || {};
 
@@ -2547,6 +2642,7 @@ function renderPaperTradeCard(x, history=false){
         • CL ${compactNumber(x.cut_loss)}<br>
         Setup ${x.setup || '-'}
         • Score ${Number(x.scanner_score || 0).toFixed(1)}
+        ${x.batch_tag === 'TOP3' ? ' • TOP 3 #' + Number(x.scanner_rank || 0) : ''}
         ${entryHint}<br>
         ${x.monitor_note || 'Belum diperbarui.'}
         ${closedDate ? '<br>Selesai ' + closedDate : ''}
@@ -3810,6 +3906,14 @@ async function runScanner(){
         ⭐ TOP 3 PILIHAN RADAR
         <div class="small" style="margin-top:4px">
           Kandidat utama tidak diulang lagi di daftar bawah.
+        </div>
+        <button class="refresh"
+          style="margin-top:10px"
+          onclick='addPaperTradesBatch(${JSON.stringify(topPicks)})'>
+          🧪 Paper Trade TOP 3
+        </button>
+        <div id="batchPaperStatus" class="small" style="margin-top:7px">
+          Tambahkan kandidat utama sekaligus untuk mempercepat pengumpulan sampel.
         </div>
       </div>
       ${topPicks.map((x)=>`

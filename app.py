@@ -515,6 +515,47 @@ def scan_one_ticker(ticker, date_to):
     }
 
 
+def build_scanner_reason(item):
+    setup = item.get("setup")
+    trend = float(item.get("trend_score") or 0)
+    volume = float(item.get("volume_score") or 0)
+    risk = float(item.get("risk_score") or 0)
+
+    reasons = []
+
+    if trend >= 80:
+        reasons.append("trend sangat kuat")
+    elif trend >= 65:
+        reasons.append("trend kuat")
+    elif trend >= 55:
+        reasons.append("trend mulai positif")
+
+    if volume >= 65:
+        reasons.append("volume mendukung")
+    elif volume >= 55:
+        reasons.append("volume mulai menguat")
+    else:
+        reasons.append("volume belum kuat")
+
+    if risk >= 65:
+        reasons.append("risiko relatif terkendali")
+    elif risk >= 55:
+        reasons.append("risiko masih layak dipantau")
+    else:
+        reasons.append("risiko perlu perhatian")
+
+    if setup == "Momentum":
+        action_note = "lebih cocok dipantau untuk kelanjutan momentum"
+    elif setup == "Watch Pullback":
+        action_note = "lebih cocok menunggu pullback ke area entry"
+    elif setup == "Early Watch":
+        action_note = "masih tahap awal, butuh konfirmasi tambahan"
+    else:
+        action_note = "belum actionable"
+
+    return ", ".join(reasons) + "; " + action_note
+
+
 @app.route("/api/scanner")
 def scanner():
     date_to = request.args.get("to")
@@ -589,6 +630,19 @@ def scanner():
         reverse=True,
     )
 
+    top_picks = []
+
+    for rank, item in enumerate(actionable[:3], start=1):
+        pick = dict(item)
+        pick["rank"] = rank
+        pick["reason"] = build_scanner_reason(item)
+        pick["priority"] = (
+            "A" if item["score"] >= 70
+            else "B" if item["score"] >= 60
+            else "C"
+        )
+        top_picks.append(pick)
+
     return jsonify({
         "success": True,
         "date": date_to,
@@ -596,7 +650,7 @@ def scanner():
         "universe_size": len(SCANNER_UNIVERSE),
         "scanned": len(results),
         "liquidity_filter": "avg value 20D >= Rp2B dan minimal 15 hari aktif",
-        "note": "Scanner V2 memisahkan Momentum, Watch Pullback, Early Watch, dan Neutral. Analisa Full dipakai untuk konfirmasi broker.",
+        "note": "Scanner V3 menampilkan Top 3 kandidat dari setup actionable, lalu Analisa Full dipakai untuk konfirmasi broker.",
         "summary": {
             "momentum": len(groups["momentum"]),
             "pullback": len(groups["pullback"]),
@@ -604,6 +658,7 @@ def scanner():
             "neutral": len(groups["neutral"]),
             "actionable": len(actionable),
         },
+        "top_picks": top_picks,
         "groups": groups,
         "results": actionable[:15],
     })

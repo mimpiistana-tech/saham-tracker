@@ -970,7 +970,7 @@ berapa persen mesin yang sudah aktif.
         Lookback sesi
         <input id="wfSessions"
           type="number"
-          value="600"
+          value="300"
           min="120"
           max="600"
           step="20"
@@ -981,7 +981,7 @@ berapa persen mesin yang sudah aktif.
         Max signal / ticker
         <input id="wfMaxSignals"
           type="number"
-          value="50"
+          value="30"
           min="10"
           max="50"
           step="5"
@@ -6307,7 +6307,7 @@ async function runWalkForwardValidation(){
     Math.min(
       600,
       Number(
-        document.getElementById('wfSessions')?.value || 600
+        document.getElementById('wfSessions')?.value || 300
       )
     )
   );
@@ -6318,7 +6318,7 @@ async function runWalkForwardValidation(){
     Math.min(
       50,
       Number(
-        document.getElementById('wfMaxSignals')?.value || 50
+        document.getElementById('wfMaxSignals')?.value || 30
       )
     )
   );
@@ -6337,7 +6337,7 @@ async function runWalkForwardValidation(){
   }
 
   target.innerHTML =
-  '<div class="loading">Menjalankan walk-forward validation...</div>';
+  '<div class="loading">Menjalankan walk-forward validation mode ringan...</div>';
 
   try{
     const response =

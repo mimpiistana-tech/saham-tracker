@@ -1502,6 +1502,517 @@ def historical_replay_batch():
     })
 
 
+
+def find_historical_entry(rows, signal_index, item, entry_wait):
+    plan = item.get("paper_plan") or {}
+    entry = float(plan.get("entry") or 0)
+
+    if entry <= 0:
+        return None
+
+    first_future = signal_index + 1
+    last_entry_index = min(
+        len(rows) - 1,
+        signal_index + max(1, entry_wait),
+    )
+
+    for j in range(first_future, last_entry_index + 1):
+        row = rows[j]
+        high = float(row.get("high") or row.get("close") or 0)
+        low = float(row.get("low") or row.get("close") or 0)
+
+        if low <= entry <= high:
+            return j
+
+    return None
+
+
+def simulate_exit_model(
+    rows,
+    signal_index,
+    entry_index,
+    item,
+    max_hold,
+    mode,
+):
+    plan = item.get("paper_plan") or {}
+
+    entry = float(plan.get("entry") or 0)
+    cut_loss = float(plan.get("cut_loss") or 0)
+    tp1 = float(plan.get("tp1") or 0)
+    tp2 = float(plan.get("tp2") or 0)
+
+    if not (
+        entry > 0
+        and cut_loss > 0
+        and tp1 > entry
+        and tp2 > tp1
+        and cut_loss < entry
+    ):
+        return None
+
+    last_hold_index = min(
+        len(rows) - 1,
+        entry_index + max(1, max_hold) - 1,
+    )
+
+    tp1_hit = False
+    partial_done = False
+    exit_index = entry_index
+    status = "TIME"
+
+    realized_weighted_return = 0.0
+    open_weight = 1.0
+
+    def ret(price):
+        return (float(price) / entry) - 1.0
+
+    for j in range(entry_index, last_hold_index + 1):
+        row = rows[j]
+        high = float(row.get("high") or row.get("close") or 0)
+        low = float(row.get("low") or row.get("close") or 0)
+
+        # Daily OHLC does not reveal intraday order.
+        # Conservative tie-break: stop is checked before target.
+        active_stop = (
+            entry
+            if mode == "C" and partial_done
+            else cut_loss
+        )
+
+        if low <= active_stop:
+            realized_weighted_return += (
+                open_weight * ret(active_stop)
+            )
+            open_weight = 0.0
+            exit_index = j
+
+            if partial_done:
+                status = (
+                    "TP1_BE"
+                    if active_stop == entry
+                    else "TP1_CL"
+                )
+            else:
+                status = "CL"
+
+            break
+
+        if not partial_done and high >= tp1:
+            tp1_hit = True
+
+            if mode in {"B", "C"}:
+                realized_weighted_return += (
+                    0.5 * ret(tp1)
+                )
+                open_weight = 0.5
+                partial_done = True
+
+                # For model C, if TP1 and breakeven are both inside
+                # the same daily candle, assume the runner exits BE.
+                if mode == "C" and low <= entry:
+                    realized_weighted_return += (
+                        open_weight * ret(entry)
+                    )
+                    open_weight = 0.0
+                    exit_index = j
+                    status = "TP1_BE"
+                    break
+
+        if high >= tp2:
+            if mode == "A":
+                realized_weighted_return += ret(tp2)
+                open_weight = 0.0
+                status = "TP2"
+            else:
+                realized_weighted_return += (
+                    open_weight * ret(tp2)
+                )
+                open_weight = 0.0
+                status = "TP1_TP2"
+
+            exit_index = j
+            break
+
+        exit_index = j
+
+    if open_weight > 0:
+        last_close = float(
+            rows[exit_index].get("close") or entry
+        )
+
+        realized_weighted_return += (
+            open_weight * ret(last_close)
+        )
+
+        status = (
+            "TP1_TIME"
+            if partial_done
+            else "TIME"
+        )
+
+        open_weight = 0.0
+
+    pnl_pct = realized_weighted_return * 100.0
+    effective_exit = entry * (1.0 + realized_weighted_return)
+
+    return {
+        "ticker": item.get("ticker"),
+        "signal_date": rows[signal_index].get("date"),
+        "entry_date": rows[entry_index].get("date"),
+        "exit_date": rows[exit_index].get("date"),
+        "setup": item.get("setup"),
+        "score": float(item.get("score") or 0),
+        "entry": round(entry, 2),
+        "cut_loss": round(cut_loss, 2),
+        "tp1": round(tp1, 2),
+        "tp2": round(tp2, 2),
+        "effective_exit": round(effective_exit, 2),
+        "status": status,
+        "tp1_hit": tp1_hit,
+        "pnl_pct": round(pnl_pct, 4),
+        "hold_sessions": (exit_index - entry_index) + 1,
+        "exit_model": mode,
+    }
+
+
+def collect_ab_replay_for_ticker(
+    ticker,
+    date_to,
+    lookback_sessions,
+    max_signals,
+    entry_wait,
+    max_hold,
+):
+    calendar_days = min(
+        1800,
+        max(
+            500,
+            int(lookback_sessions * 2.2) + 260,
+        ),
+    )
+
+    data, status, cache_state = get_historical_ohlcv(
+        ticker,
+        date_to,
+        calendar_days,
+    )
+
+    if status != 200:
+        return {
+            "success": False,
+            "ticker": ticker,
+            "error": data.get("error", "Replay gagal"),
+        }
+
+    rows = extract_ohlcv_rows(data)
+
+    if len(rows) < 80:
+        return {
+            "success": False,
+            "ticker": ticker,
+            "error": "Data historis belum cukup",
+        }
+
+    start_index = max(
+        60,
+        len(rows) - lookback_sessions,
+    )
+
+    entries = []
+    signals_seen = 0
+    expired_signals = 0
+    i = start_index
+
+    while i < len(rows) - 1 and len(entries) < max_signals:
+        history = rows[:i + 1]
+
+        item = build_scanner_item_from_rows(
+            ticker,
+            history,
+            "REPLAY_AB",
+        )
+
+        if (
+            not item
+            or item.get("setup") not in {
+                "Momentum",
+                "Watch Pullback",
+                "Early Watch",
+            }
+            or float(item.get("score") or 0) < 55
+        ):
+            i += 1
+            continue
+
+        signals_seen += 1
+
+        entry_index = find_historical_entry(
+            rows,
+            i,
+            item,
+            entry_wait,
+        )
+
+        if entry_index is None:
+            expired_signals += 1
+            i += max(1, entry_wait)
+            continue
+
+        entries.append({
+            "signal_index": i,
+            "entry_index": entry_index,
+            "item": item,
+        })
+
+        # Fixed cooldown keeps the exact same signal set for A/B/C
+        # and reduces repeated near-identical daily signals.
+        i = entry_index + 5
+
+    models = {
+        "A": [],
+        "B": [],
+        "C": [],
+    }
+
+    for candidate in entries:
+        for mode in models:
+            trade = simulate_exit_model(
+                rows,
+                candidate["signal_index"],
+                candidate["entry_index"],
+                candidate["item"],
+                max_hold,
+                mode,
+            )
+
+            if trade:
+                models[mode].append(trade)
+
+    return {
+        "success": True,
+        "ticker": ticker,
+        "cache": cache_state,
+        "signals_seen": signals_seen,
+        "expired_signals": expired_signals,
+        "entries": len(entries),
+        "models": models,
+    }
+
+
+@app.route("/api/historical-exit-ab")
+def historical_exit_ab():
+    raw_tickers = request.args.get("tickers", "")
+    date_to = request.args.get("to")
+
+    try:
+        lookback_sessions = int(
+            request.args.get("sessions", "300")
+        )
+        max_signals = int(
+            request.args.get("max_signals", "30")
+        )
+        entry_wait = int(
+            request.args.get("entry_wait", "5")
+        )
+        max_hold = int(
+            request.args.get("max_hold", "20")
+        )
+    except ValueError:
+        return jsonify({
+            "success": False,
+            "error": "Parameter A/B replay harus berupa angka",
+        }), 400
+
+    if not date_to:
+        return jsonify({
+            "success": False,
+            "error": "Parameter to wajib diisi",
+        }), 400
+
+    try:
+        datetime.strptime(date_to, "%Y-%m-%d")
+    except ValueError:
+        return jsonify({
+            "success": False,
+            "error": "Format tanggal harus YYYY-MM-DD",
+        }), 400
+
+    requested = []
+
+    for part in raw_tickers.replace(";", ",").split(","):
+        ticker = part.strip().upper()
+
+        if ticker and ticker not in requested:
+            requested.append(ticker)
+
+    if not requested:
+        requested = [
+            "BBRI", "BBCA", "BMRI", "TLKM", "ASII",
+            "UNTR", "PTBA", "ANTM", "SMDR", "PWON",
+        ]
+
+    requested = requested[:20]
+
+    lookback_sessions = max(
+        80,
+        min(lookback_sessions, 600),
+    )
+    max_signals = max(
+        5,
+        min(max_signals, 50),
+    )
+    entry_wait = max(
+        1,
+        min(entry_wait, 10),
+    )
+    max_hold = max(
+        3,
+        min(max_hold, 60),
+    )
+
+    results = []
+
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        futures = {
+            executor.submit(
+                collect_ab_replay_for_ticker,
+                ticker,
+                date_to,
+                lookback_sessions,
+                max_signals,
+                entry_wait,
+                max_hold,
+            ): ticker
+            for ticker in requested
+        }
+
+        for future in as_completed(futures):
+            ticker = futures[future]
+
+            try:
+                result = future.result()
+            except Exception as e:
+                result = {
+                    "success": False,
+                    "ticker": ticker,
+                    "error": str(e),
+                }
+
+            results.append(result)
+
+    successful = [
+        x for x in results
+        if x.get("success")
+    ]
+
+    failed = [
+        x for x in results
+        if not x.get("success")
+    ]
+
+    combined = {
+        "A": [],
+        "B": [],
+        "C": [],
+    }
+
+    for result in successful:
+        for mode in combined:
+            combined[mode].extend(
+                result.get("models", {}).get(mode, [])
+            )
+
+    labels = {
+        "A": "Full position: TP2 atau CL",
+        "B": "50% TP1 + 50% runner ke TP2/CL",
+        "C": "50% TP1 + runner stop breakeven",
+    }
+
+    model_summary = {}
+    setup_summary = {}
+
+    for mode, trades in combined.items():
+        trades.sort(
+            key=lambda x: (
+                x.get("exit_date") or "",
+                x.get("ticker") or "",
+            )
+        )
+
+        model_summary[mode] = {
+            "label": labels[mode],
+            "summary": summarize_historical_trades(trades),
+        }
+
+        setup_summary[mode] = {}
+
+        for setup in [
+            "Momentum",
+            "Watch Pullback",
+            "Early Watch",
+        ]:
+            subset = [
+                x for x in trades
+                if x.get("setup") == setup
+            ]
+
+            if subset:
+                setup_summary[mode][setup] = (
+                    summarize_historical_trades(subset)
+                )
+
+    per_ticker = []
+
+    for result in successful:
+        row = {
+            "ticker": result.get("ticker"),
+            "entries": result.get("entries", 0),
+            "signals_seen": result.get("signals_seen", 0),
+            "models": {},
+        }
+
+        for mode in ["A", "B", "C"]:
+            row["models"][mode] = summarize_historical_trades(
+                result.get("models", {}).get(mode, [])
+            )
+
+        per_ticker.append(row)
+
+    per_ticker.sort(
+        key=lambda x: requested.index(x["ticker"])
+        if x["ticker"] in requested
+        else 999
+    )
+
+    return jsonify({
+        "success": True,
+        "date_to": date_to,
+        "source": "Yahoo Finance daily OHLCV",
+        "settings": {
+            "lookback_sessions": lookback_sessions,
+            "max_signals_per_ticker": max_signals,
+            "entry_wait_sessions": entry_wait,
+            "max_hold_sessions": max_hold,
+            "ticker_count": len(requested),
+            "fixed_signal_cooldown_sessions": 5,
+        },
+        "models": model_summary,
+        "setup_summary": setup_summary,
+        "per_ticker": per_ticker,
+        "failed": failed,
+        "assumptions": [
+            "Semua model memakai signal dan entry yang sama agar perbandingan exit lebih adil.",
+            "Model A menahan seluruh posisi ke TP2/CL.",
+            "Model B merealisasikan 50% di TP1 dan 50% sisanya ke TP2 atau CL awal.",
+            "Model C merealisasikan 50% di TP1 lalu menaikkan stop sisa posisi ke breakeven.",
+            "Jika stop dan target berada pada candle harian yang sama, stop dievaluasi lebih dulu.",
+            "Biaya transaksi dan slippage belum dimasukkan.",
+            "Hasil A/B tidak menggantikan forward Paper Trade.",
+        ],
+    })
+
+
 @app.route("/api/paper-check")
 def paper_check():
     ticker = request.args.get("ticker", "").upper().strip()

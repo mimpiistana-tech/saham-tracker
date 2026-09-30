@@ -2076,10 +2076,124 @@ def walk_forward_status(train_summary, test_summary):
     }
 
 
+@app.route("/api/walk-forward-cutoff")
+def walk_forward_cutoff():
+    date_to = request.args.get("to")
+    reference = (
+        request.args.get("reference", "BBCA")
+        .upper()
+        .strip()
+    )
+
+    try:
+        lookback_sessions = int(
+            request.args.get("sessions", "300")
+        )
+        train_pct = int(
+            request.args.get("train_pct", "70")
+        )
+    except ValueError:
+        return jsonify({
+            "success": False,
+            "error": "sessions dan train_pct harus berupa angka",
+        }), 400
+
+    if not date_to:
+        return jsonify({
+            "success": False,
+            "error": "Parameter to wajib diisi",
+        }), 400
+
+    try:
+        datetime.strptime(date_to, "%Y-%m-%d")
+    except ValueError:
+        return jsonify({
+            "success": False,
+            "error": "Format tanggal harus YYYY-MM-DD",
+        }), 400
+
+    lookback_sessions = max(
+        120,
+        min(lookback_sessions, 600),
+    )
+
+    train_pct = max(
+        50,
+        min(train_pct, 85),
+    )
+
+    calendar_days = min(
+        1800,
+        max(
+            500,
+            int(lookback_sessions * 2.2) + 260,
+        ),
+    )
+
+    data, status, cache_state = get_historical_ohlcv(
+        reference,
+        date_to,
+        calendar_days,
+    )
+
+    if status != 200:
+        return jsonify({
+            "success": False,
+            "error": data.get(
+                "error",
+                "Gagal mengambil trading calendar",
+            ),
+        }), status
+
+    rows = extract_ohlcv_rows(data)
+    rows = rows[-lookback_sessions:]
+
+    if len(rows) < 20:
+        return jsonify({
+            "success": False,
+            "error": "Trading calendar terlalu pendek",
+        }), 422
+
+    split_index = int(
+        len(rows) * (train_pct / 100.0)
+    )
+
+    split_index = max(
+        1,
+        min(split_index, len(rows) - 1),
+    )
+
+    cutoff_date = rows[
+        split_index - 1
+    ].get("date")
+
+    return jsonify({
+        "success": True,
+        "reference": reference,
+        "source": "Yahoo Finance daily OHLCV",
+        "cache": cache_state,
+        "lookback_sessions_requested": lookback_sessions,
+        "calendar_sessions_used": len(rows),
+        "train_pct": train_pct,
+        "test_pct": 100 - train_pct,
+        "cutoff_signal_date": cutoff_date,
+        "first_date": rows[0].get("date"),
+        "last_date": rows[-1].get("date"),
+        "note": (
+            "Cutoff ini dipakai sama untuk semua batch "
+            "agar train/holdout apple-to-apple."
+        ),
+    })
+
+
 @app.route("/api/historical-walk-forward")
 def historical_walk_forward():
     raw_tickers = request.args.get("tickers", "")
     date_to = request.args.get("to")
+    cutoff_date = (
+        request.args.get("cutoff_date", "")
+        .strip()
+    )
 
     try:
         lookback_sessions = int(
@@ -2116,6 +2230,18 @@ def historical_walk_forward():
             "success": False,
             "error": "Format tanggal harus YYYY-MM-DD",
         }), 400
+
+    if cutoff_date:
+        try:
+            datetime.strptime(
+                cutoff_date,
+                "%Y-%m-%d",
+            )
+        except ValueError:
+            return jsonify({
+                "success": False,
+                "error": "Format cutoff_date harus YYYY-MM-DD",
+            }), 400
 
     requested = []
 
@@ -2226,18 +2352,23 @@ def historical_walk_forward():
             "trades": len(reference),
         }), 422
 
-    split_index = int(
-        len(reference) * (train_pct / 100.0)
-    )
+    if cutoff_date:
+        cutoff_signal_date = cutoff_date
+        cutoff_source = "global_fixed"
+    else:
+        split_index = int(
+            len(reference) * (train_pct / 100.0)
+        )
 
-    split_index = max(
-        1,
-        min(split_index, len(reference) - 1),
-    )
+        split_index = max(
+            1,
+            min(split_index, len(reference) - 1),
+        )
 
-    cutoff_signal_date = (
-        reference[split_index - 1].get("signal_date")
-    )
+        cutoff_signal_date = (
+            reference[split_index - 1].get("signal_date")
+        )
+        cutoff_source = "batch_fallback"
 
     labels = {
         "A": "Full position: TP2 atau CL",
@@ -2312,6 +2443,7 @@ def historical_walk_forward():
             "train_pct": train_pct,
             "test_pct": 100 - train_pct,
             "cutoff_signal_date": cutoff_signal_date,
+            "cutoff_source": cutoff_source,
         },
         "successful_tickers": len(successful),
         "failed_tickers": len(failed),
@@ -2319,6 +2451,7 @@ def historical_walk_forward():
         "models": models,
         "assumptions": [
             "Split dibuat kronologis: periode lama untuk development, periode terbaru sebagai holdout.",
+            "Jika cutoff_date dikirim, semua batch memakai tanggal cutoff global yang sama.",
             "Signal dan entry tiap model A/B/C tetap sama; yang dibandingkan hanya exit.",
             "Holdout tidak dipakai untuk mengubah aturan selama pengujian.",
             "Broker IndexAlpha tidak dipakai.",

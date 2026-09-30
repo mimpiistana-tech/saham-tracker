@@ -1029,6 +1029,51 @@ berapa persen mesin yang sudah aktif.
       </div>
     </div>
 
+    <h2 style="margin-top:18px">🧪 Validation Engine</h2>
+    <div class="note">
+      Menguji hasil Paper Trade yang benar-benar selesai. Fokusnya: expectancy, drawdown, TP1 hit rate, kualitas sampel, score band, dan cohort Execution Gate.
+    </div>
+
+    <div id="validationSummary" class="status-box">
+      <div class="loading">Belum ada trade selesai untuk divalidasi.</div>
+    </div>
+
+    <div class="grid" style="margin-top:10px">
+      <div class="tile">
+        <div class="tile-title">🧮 EXPECTANCY</div>
+        <div id="validationExpectancy" class="tile-value blue">--</div>
+        <div class="small">Rata-rata hasil per trade selesai</div>
+      </div>
+      <div class="tile">
+        <div class="tile-title">📉 MAX DRAWDOWN</div>
+        <div id="validationMaxDrawdown" class="tile-value yellow">--</div>
+        <div class="small">Penurunan dari peak equity paper</div>
+      </div>
+      <div class="tile">
+        <div class="tile-title">🎯 TP1 HIT RATE</div>
+        <div id="validationTp1Rate" class="tile-value green">--</div>
+        <div class="small">Trade selesai yang sempat menyentuh TP1</div>
+      </div>
+      <div class="tile">
+        <div class="tile-title">🧫 SAMPLE PROGRESS</div>
+        <div id="validationSampleProgress" class="tile-value blue">0/30</div>
+        <div class="small">30 = threshold internal minimum</div>
+      </div>
+    </div>
+
+    <h2 style="margin-top:16px">📊 Validasi per Scanner Score</h2>
+    <div id="validationScoreBands">
+      <div class="loading">Belum ada sampel score selesai.</div>
+    </div>
+
+    <h2 style="margin-top:16px">🚦 READY vs WAIT saat Entry</h2>
+    <div class="note">
+      Cohort ini mulai tercatat saat posisi baru berubah dari WAIT ENTRY menjadi OPEN. Trade lama sebelum fitur ini bisa tampil sebagai UNKNOWN.
+    </div>
+    <div id="validationGateCohorts">
+      <div class="loading">Belum ada snapshot Execution Gate saat entry.</div>
+    </div>
+
     <h2 style="margin-top:18px">📈 Equity Curve Paper Trade</h2>
     <div class="note">
       Grafik kumulatif hasil paper trade yang sudah selesai. Garis naik berarti hasil total bertambah, garis turun menunjukkan drawdown.
@@ -3716,10 +3761,82 @@ async function updatePaperTrade(item){
 
   const data = await response.json();
 
+  const nextStatus =
+  data.state || item.status;
+
+  let entryGateSnapshot = null;
+
+  if(
+    !item.entry_gate_level &&
+    item.status === 'WAIT_ENTRY' &&
+    ['OPEN','TP1_HIT','TP2','CL'].includes(nextStatus)
+  ){
+    const activeRows =
+    getPaperTrades().filter(x =>
+      ['WAIT_ENTRY','OPEN','TP1_HIT'].includes(x.status)
+    );
+
+    const gate =
+    evaluateExecutionGate(
+      item,
+      activeRows
+    );
+
+    entryGateSnapshot = {
+      level:gate.level,
+      label:gate.label,
+      at:new Date().toISOString(),
+      checksPassed:
+        gate.checks.filter(x=>x.pass).length,
+      checksTotal:
+        gate.checks.length,
+      brokerScore:
+        gate.analysis?.brokerScore == null
+        ? null
+        : Number(gate.analysis.brokerScore),
+      signalAction:
+        gate.analysis?.signalAction || null,
+      fullAnalysisAt:
+        gate.analysis?.savedAt || null
+    };
+  }
+
   return {
     ...item,
     created_ts: createdTs,
-    status: data.state || item.status,
+    status: nextStatus,
+    entry_gate_level:
+      item.entry_gate_level ||
+      entryGateSnapshot?.level ||
+      null,
+    entry_gate_label:
+      item.entry_gate_label ||
+      entryGateSnapshot?.label ||
+      null,
+    entry_gate_at:
+      item.entry_gate_at ||
+      entryGateSnapshot?.at ||
+      null,
+    entry_gate_checks_passed:
+      item.entry_gate_checks_passed ??
+      entryGateSnapshot?.checksPassed ??
+      null,
+    entry_gate_checks_total:
+      item.entry_gate_checks_total ??
+      entryGateSnapshot?.checksTotal ??
+      null,
+    entry_gate_broker_score:
+      item.entry_gate_broker_score ??
+      entryGateSnapshot?.brokerScore ??
+      null,
+    entry_gate_signal_action:
+      item.entry_gate_signal_action ||
+      entryGateSnapshot?.signalAction ||
+      null,
+    entry_gate_full_analysis_at:
+      item.entry_gate_full_analysis_at ||
+      entryGateSnapshot?.fullAnalysisAt ||
+      null,
     last_price: Number(data.last_price || 0),
     pnl_pct:
       data.pnl_pct == null
@@ -3967,6 +4084,24 @@ function renderPaperTradeCard(x, history=false){
   ? new Date(x.closed_at).toLocaleString('id-ID')
   : '';
 
+  const historyValidationHtml =
+  history && x.entry_gate_level
+  ? (
+      '<br>🚦 Gate saat entry ' +
+      String(x.entry_gate_level).toUpperCase() +
+      (
+        x.entry_gate_checks_passed != null &&
+        x.entry_gate_checks_total != null
+        ? ' • ' +
+          x.entry_gate_checks_passed +
+          '/' +
+          x.entry_gate_checks_total +
+          ' checks'
+        : ''
+      )
+    )
+  : '';
+
   return `
     <div class="status-box">
       <div class="status-title">
@@ -3989,6 +4124,7 @@ function renderPaperTradeCard(x, history=false){
         ${tradeGuardHtml}
         ${executionGateHtml}<br>
         ${x.monitor_note || 'Belum diperbarui.'}
+        ${historyValidationHtml}
         ${closedDate ? '<br>Selesai ' + closedDate : ''}
       </div>
 
@@ -4079,6 +4215,452 @@ function renderSetupPeriodControls(){
       setupPerformancePeriod +
       ' hari terakhir.';
   }
+}
+
+function computeValidationMetrics(historyRows){
+  const closed =
+  (historyRows || [])
+  .filter(x =>
+    ['TP2','TP','CL'].includes(x.status) &&
+    x.realized_pnl_pct != null &&
+    Number.isFinite(Number(x.realized_pnl_pct))
+  )
+  .sort((a,b)=>{
+    const ta =
+    new Date(
+      a.closed_at ||
+      a.exit_time ||
+      a.created_at ||
+      0
+    ).getTime();
+
+    const tb =
+    new Date(
+      b.closed_at ||
+      b.exit_time ||
+      b.created_at ||
+      0
+    ).getTime();
+
+    return ta - tb;
+  });
+
+  const pnlValues =
+  closed.map(x =>
+    Number(x.realized_pnl_pct)
+  );
+
+  const wins =
+  pnlValues.filter(x => x > 0);
+
+  const losses =
+  pnlValues.filter(x => x < 0);
+
+  const expectancy =
+  pnlValues.length
+  ? pnlValues.reduce((a,b)=>a+b,0) / pnlValues.length
+  : null;
+
+  const avgWin =
+  wins.length
+  ? wins.reduce((a,b)=>a+b,0) / wins.length
+  : null;
+
+  const avgLoss =
+  losses.length
+  ? Math.abs(
+      losses.reduce((a,b)=>a+b,0) / losses.length
+    )
+  : null;
+
+  let cumulative = 0;
+  let peak = 0;
+  let maxDrawdown = 0;
+
+  for(const pnl of pnlValues){
+    cumulative += pnl;
+
+    if(cumulative > peak){
+      peak = cumulative;
+    }
+
+    maxDrawdown =
+    Math.max(
+      maxDrawdown,
+      peak - cumulative
+    );
+  }
+
+  const tp1Hits =
+  closed.filter(x =>
+    Boolean(x.tp1_hit) ||
+    x.status === 'TP2'
+  ).length;
+
+  const tp1Rate =
+  closed.length
+  ? (tp1Hits / closed.length) * 100
+  : null;
+
+  return {
+    closed,
+    total:closed.length,
+    expectancy,
+    avgWin,
+    avgLoss,
+    maxDrawdown,
+    tp1Hits,
+    tp1Rate,
+    cumulative
+  };
+}
+
+function validationGroupStats(items){
+  const rows =
+  (items || [])
+  .filter(x =>
+    x.realized_pnl_pct != null &&
+    Number.isFinite(Number(x.realized_pnl_pct))
+  );
+
+  const total =
+  rows.length;
+
+  const wins =
+  rows.filter(x =>
+    ['TP2','TP'].includes(x.status)
+  ).length;
+
+  const losses =
+  rows.filter(x =>
+    x.status === 'CL'
+  ).length;
+
+  const avg =
+  total
+  ? rows.reduce(
+      (sum,x)=>sum + Number(x.realized_pnl_pct),
+      0
+    ) / total
+  : null;
+
+  const winRate =
+  total
+  ? (wins / total) * 100
+  : null;
+
+  return {
+    total,
+    wins,
+    losses,
+    avg,
+    winRate
+  };
+}
+
+function validationStatCard(title,stats,detail=''){
+  const avgText =
+  stats.avg == null
+  ? '--'
+  : (
+      (stats.avg >= 0 ? '+' : '') +
+      stats.avg.toFixed(2) + '%'
+    );
+
+  const avgClass =
+  stats.avg == null
+  ? 'yellow'
+  : stats.avg >= 0
+    ? 'green'
+    : 'red';
+
+  const wrText =
+  stats.winRate == null
+  ? '--'
+  : stats.winRate.toFixed(1) + '%';
+
+  return `
+    <div class="status-box">
+      <div class="status-title">${title}</div>
+      <div class="status-value">
+        Win Rate ${wrText}
+        • <span class="${avgClass}">AVG ${avgText}</span>
+      </div>
+      <div class="small" style="margin-top:6px;line-height:1.7">
+        Sampel ${stats.total}
+        • Win ${stats.wins}
+        • Loss ${stats.losses}
+        ${detail ? '<br>' + detail : ''}
+      </div>
+    </div>
+  `;
+}
+
+function renderValidationEngine(historyRows){
+  const summary =
+  document.getElementById('validationSummary');
+
+  const expectancyEl =
+  document.getElementById('validationExpectancy');
+
+  const drawdownEl =
+  document.getElementById('validationMaxDrawdown');
+
+  const tp1El =
+  document.getElementById('validationTp1Rate');
+
+  const sampleEl =
+  document.getElementById('validationSampleProgress');
+
+  const scoreTarget =
+  document.getElementById('validationScoreBands');
+
+  const gateTarget =
+  document.getElementById('validationGateCohorts');
+
+  if(
+    !summary ||
+    !expectancyEl ||
+    !drawdownEl ||
+    !tp1El ||
+    !sampleEl ||
+    !scoreTarget ||
+    !gateTarget
+  ){
+    return;
+  }
+
+  const metrics =
+  computeValidationMetrics(historyRows);
+
+  const minSample = 30;
+  const strongSample = 50;
+
+  const progressPct =
+  Math.min(
+    100,
+    (metrics.total / minSample) * 100
+  );
+
+  let maturityLabel =
+  '🔴 SANGAT AWAL';
+
+  let maturityClass =
+  'red';
+
+  let maturityNote =
+  'Belum cukup sampel untuk menilai konsistensi sistem.';
+
+  if(metrics.total >= strongSample){
+    maturityLabel =
+    '🟢 SAMPEL KUAT';
+
+    maturityClass =
+    'green';
+
+    maturityNote =
+    'Jumlah sampel sudah melewati threshold internal kuat. Tetap evaluasi kualitas hasil, bukan jumlah saja.';
+  }else if(metrics.total >= minSample){
+    maturityLabel =
+    '🟢 MINIMUM TERCAPAI';
+
+    maturityClass =
+    'green';
+
+    maturityNote =
+    'Threshold internal minimum 30 trade sudah tercapai.';
+  }else if(metrics.total >= 10){
+    maturityLabel =
+    '🟡 SEDANG DIKUMPULKAN';
+
+    maturityClass =
+    'yellow';
+
+    maturityNote =
+    'Sampel mulai berguna, tetapi masih perlu diperbanyak.';
+  }
+
+  summary.innerHTML =
+  '<div class="status-title">STATUS VALIDASI</div>' +
+  '<div class="status-value ' + maturityClass + '">' +
+  maturityLabel +
+  '</div>' +
+  '<div class="small" style="margin-top:7px;line-height:1.7">' +
+  'Trade selesai ' + metrics.total +
+  ' • Target minimum ' + minSample +
+  ' • Target kuat ' + strongSample +
+  '<br>' + maturityNote +
+  '</div>' +
+  '<div style="height:9px;background:#071827;border-radius:999px;margin-top:10px;overflow:hidden">' +
+    '<div style="height:100%;width:' + progressPct.toFixed(1) + '%;background:#19e6a2;border-radius:999px"></div>' +
+  '</div>';
+
+  expectancyEl.textContent =
+  metrics.expectancy == null
+  ? '--'
+  : (
+      (metrics.expectancy >= 0 ? '+' : '') +
+      metrics.expectancy.toFixed(2) + '%'
+    );
+
+  expectancyEl.className =
+  'tile-value ' +
+  (
+    metrics.expectancy == null
+    ? 'blue'
+    : metrics.expectancy >= 0
+      ? 'green'
+      : 'red'
+  );
+
+  drawdownEl.textContent =
+  metrics.total
+  ? metrics.maxDrawdown.toFixed(2) + '%'
+  : '--';
+
+  drawdownEl.className =
+  'tile-value ' +
+  (
+    metrics.total && metrics.maxDrawdown > 10
+    ? 'red'
+    : 'yellow'
+  );
+
+  tp1El.textContent =
+  metrics.tp1Rate == null
+  ? '--'
+  : metrics.tp1Rate.toFixed(1) + '%';
+
+  sampleEl.textContent =
+  metrics.total + '/' + minSample;
+
+  sampleEl.className =
+  'tile-value ' +
+  (
+    metrics.total >= minSample
+    ? 'green'
+    : metrics.total >= 10
+      ? 'yellow'
+      : 'blue'
+  );
+
+  if(!metrics.total){
+    scoreTarget.innerHTML =
+    '<div class="loading">Belum ada sampel score selesai.</div>';
+
+    gateTarget.innerHTML =
+    '<div class="loading">Belum ada snapshot Execution Gate saat entry.</div>';
+
+    return;
+  }
+
+  const bands = [
+    {
+      label:'📉 Score <55',
+      test:s=>s < 55
+    },
+    {
+      label:'🟡 Score 55–64.9',
+      test:s=>s >= 55 && s < 65
+    },
+    {
+      label:'🟢 Score 65–74.9',
+      test:s=>s >= 65 && s < 75
+    },
+    {
+      label:'🔥 Score 75+',
+      test:s=>s >= 75
+    }
+  ];
+
+  const bandCards =
+  bands
+  .map(band=>{
+    const items =
+    metrics.closed.filter(x=>{
+      const score =
+      Number(x.scanner_score);
+
+      return (
+        Number.isFinite(score) &&
+        band.test(score)
+      );
+    });
+
+    if(!items.length){
+      return '';
+    }
+
+    const stats =
+    validationGroupStats(items);
+
+    const avgScore =
+    items.reduce(
+      (sum,x)=>sum + Number(x.scanner_score),
+      0
+    ) / items.length;
+
+    return validationStatCard(
+      band.label,
+      stats,
+      'Avg Scanner Score ' + avgScore.toFixed(1)
+    );
+  })
+  .filter(Boolean)
+  .join('');
+
+  scoreTarget.innerHTML =
+  bandCards ||
+  '<div class="loading">Belum ada scanner score pada trade selesai.</div>';
+
+  const knownGateRows =
+  metrics.closed.filter(x =>
+    ['READY','WAIT','BLOCK'].includes(
+      String(x.entry_gate_level || '').toUpperCase()
+    )
+  );
+
+  const cohorts = [
+    ['🟢 Gate READY','READY'],
+    ['🟡 Gate WAIT','WAIT'],
+    ['🔴 Gate BLOKIR','BLOCK']
+  ];
+
+  const cohortCards =
+  cohorts
+  .map(([label,level])=>{
+    const items =
+    knownGateRows.filter(x =>
+      String(x.entry_gate_level || '').toUpperCase() === level
+    );
+
+    if(!items.length){
+      return '';
+    }
+
+    return validationStatCard(
+      label,
+      validationGroupStats(items)
+    );
+  })
+  .filter(Boolean)
+  .join('');
+
+  const unknownCount =
+  metrics.total - knownGateRows.length;
+
+  gateTarget.innerHTML =
+  (
+    cohortCards ||
+    '<div class="loading">Belum ada trade selesai dengan snapshot Gate saat entry.</div>'
+  ) +
+  (
+    unknownCount > 0
+    ? '<div class="note" style="margin-top:8px">UNKNOWN ' +
+      unknownCount +
+      ' trade • biasanya trade lama sebelum snapshot Gate aktif.</div>'
+    : ''
+  );
 }
 
 function renderEquityCurve(historyRows){
@@ -4638,6 +5220,10 @@ function renderPaperTrades(){
   );
 
   renderSetupPerformance(
+    historyRows
+  );
+
+  renderValidationEngine(
     historyRows
   );
 

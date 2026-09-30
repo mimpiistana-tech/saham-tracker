@@ -2634,6 +2634,124 @@ function evaluateTradeGuard(item,settings=getRiskSettings()){
   };
 }
 
+function evaluatePortfolioGuard(rows,settings=getRiskSettings()){
+  const activeRows =
+  (Array.isArray(rows) ? rows : [])
+  .filter(x =>
+    ['WAIT_ENTRY','OPEN','TP1_HIT'].includes(x.status || 'WAIT_ENTRY')
+  );
+
+  const plans =
+  activeRows
+  .map(x => calculateRiskPlan(x,settings))
+  .filter(x => x.valid && x.lots > 0);
+
+  const capital =
+  Number(settings.capital || 0);
+
+  const totalPositionValue =
+  plans.reduce(
+    (sum,x)=>sum + Number(x.positionValue || 0),
+    0
+  );
+
+  const totalMaxLoss =
+  plans.reduce(
+    (sum,x)=>sum + Number(x.maxLoss || 0),
+    0
+  );
+
+  const exposurePct =
+  capital > 0
+  ? (totalPositionValue / capital) * 100
+  : 0;
+
+  const totalRiskPct =
+  capital > 0
+  ? (totalMaxLoss / capital) * 100
+  : 0;
+
+  const maxPortfolioRiskPct =
+  Number(settings.riskPct || 0) *
+  Number(settings.maxPositions || 1);
+
+  const riskWarningPct =
+  maxPortfolioRiskPct * 0.8;
+
+  const exposureWarningPct = 80;
+  const exposureBlockPct = 100;
+
+  const slotCount =
+  activeRows.length;
+
+  if(
+    slotCount > Number(settings.maxPositions || 1) ||
+    totalRiskPct > maxPortfolioRiskPct + 0.01 ||
+    exposurePct > exposureBlockPct + 0.01
+  ){
+    return {
+      level:'BLOCK',
+      label:'🔴 BLOKIR',
+      className:'red',
+      slotCount,
+      exposurePct,
+      totalRiskPct,
+      totalPositionValue,
+      totalMaxLoss,
+      maxPortfolioRiskPct,
+      reason:
+        'Risiko gabungan, exposure modal, atau jumlah slot melewati batas portfolio.'
+    };
+  }
+
+  if(
+    slotCount >= Number(settings.maxPositions || 1) ||
+    totalRiskPct >= riskWarningPct ||
+    exposurePct >= exposureWarningPct
+  ){
+    const reasons = [];
+
+    if(slotCount >= Number(settings.maxPositions || 1)){
+      reasons.push('slot posisi penuh');
+    }
+
+    if(totalRiskPct >= riskWarningPct){
+      reasons.push('risiko gabungan mendekati batas');
+    }
+
+    if(exposurePct >= exposureWarningPct){
+      reasons.push('exposure modal tinggi');
+    }
+
+    return {
+      level:'WARN',
+      label:'🟡 WARNING',
+      className:'yellow',
+      slotCount,
+      exposurePct,
+      totalRiskPct,
+      totalPositionValue,
+      totalMaxLoss,
+      maxPortfolioRiskPct,
+      reason:
+        reasons.join(' • ') + '.'
+    };
+  }
+
+  return {
+    level:'PASS',
+    label:'🟢 AMAN',
+    className:'green',
+    slotCount,
+    exposurePct,
+    totalRiskPct,
+    totalPositionValue,
+    totalMaxLoss,
+    maxPortfolioRiskPct,
+    reason:'Risiko gabungan dan exposure portfolio masih dalam batas.'
+  };
+}
+
 function renderRiskEngineSummary(activeRows){
   const target =
   document.getElementById('riskEngineSummary');
@@ -2685,6 +2803,9 @@ function renderRiskEngineSummary(activeRows){
   const overSlot =
   rows.length > settings.maxPositions;
 
+  const portfolioGuard =
+  evaluatePortfolioGuard(rows,settings);
+
   target.innerHTML =
   'Modal ' + formatRupiah(settings.capital) +
   ' • Risk/trade ' + Number(settings.riskPct).toFixed(1) + '%' +
@@ -2696,6 +2817,15 @@ function renderRiskEngineSummary(activeRows){
   'Risiko total bila semua kena CL ' +
   formatRupiah(totalMaxLoss) +
   ' (' + totalRiskPct.toFixed(2) + '% modal)' +
+  '<br>Exposure portfolio ' +
+  portfolioGuard.exposurePct.toFixed(1) + '% modal' +
+  ' • Batas risk portfolio ' +
+  portfolioGuard.maxPortfolioRiskPct.toFixed(1) + '%' +
+  '<br><b class="' + portfolioGuard.className + '">' +
+  '🧰 Portfolio Guard: ' +
+  portfolioGuard.label +
+  '</b>' +
+  '<br>' + portfolioGuard.reason +
   (
     overSlot
     ? '<br><span class="red">⚠️ Posisi aktif melebihi batas slot. Posisi baru akan diblokir.</span>'
@@ -2727,6 +2857,11 @@ function addPaperTradesBatch(items){
     .map(x => x.ticker)
   );
 
+  const portfolioRows =
+  rows.filter(x =>
+    activeStatuses.has(x.status)
+  );
+
   const riskSettings =
   getRiskSettings();
 
@@ -2742,6 +2877,7 @@ function addPaperTradesBatch(items){
   let unavailable = 0;
   let slotLimited = 0;
   let guardBlocked = 0;
+  let portfolioBlocked = 0;
 
   candidates.forEach((item,index)=>{
     const plan =
@@ -2778,7 +2914,7 @@ function addPaperTradesBatch(items){
     const createdAt =
     new Date(Date.now() + index);
 
-    rows.unshift({
+    const proposedTrade = {
       id: Date.now() + index,
       ticker: item.ticker,
       entry: Number(plan.entry),
@@ -2796,7 +2932,21 @@ function addPaperTradesBatch(items){
       batch_tag: 'TOP3',
       scanner_rank: Number(item.rank || index + 1),
       monitor_note: 'Menunggu harga masuk ke area entry.'
-    });
+    };
+
+    const portfolioGuard =
+    evaluatePortfolioGuard(
+      [...portfolioRows,proposedTrade],
+      riskSettings
+    );
+
+    if(portfolioGuard.level === 'BLOCK'){
+      portfolioBlocked += 1;
+      return;
+    }
+
+    rows.unshift(proposedTrade);
+    portfolioRows.push(proposedTrade);
 
     activeTickers.add(item.ticker);
     availableSlots -= 1;
@@ -2814,6 +2964,7 @@ function addPaperTradesBatch(items){
     ' • sudah aktif ' + skipped +
     ' • slot penuh ' + slotLimited +
     ' • guard blokir ' + guardBlocked +
+    ' • portfolio blokir ' + portfolioBlocked +
     ' • plan belum tersedia ' + unavailable;
   }
 
@@ -2908,7 +3059,7 @@ function addPaperTrade(item){
 
   const createdAt = new Date();
 
-  rows.unshift({
+  const proposedTrade = {
     id: Date.now(),
     ticker: item.ticker,
     entry: Number(plan.entry),
@@ -2924,7 +3075,33 @@ function addPaperTrade(item){
     last_price: Number(item.close || 0),
     pnl_pct: null,
     monitor_note: 'Menunggu harga masuk ke area entry.'
-  });
+  };
+
+  const activeRows =
+  rows.filter(x =>
+    activeStatuses.has(x.status)
+  );
+
+  const portfolioGuard =
+  evaluatePortfolioGuard(
+    [...activeRows,proposedTrade],
+    riskSettings
+  );
+
+  if(portfolioGuard.level === 'BLOCK'){
+    alert(
+      'Portfolio Guard BLOKIR: ' +
+      portfolioGuard.reason
+    );
+
+    if(paperNav){
+      openPaperTrades(paperNav);
+    }
+
+    return;
+  }
+
+  rows.unshift(proposedTrade);
 
   savePaperTrades(rows);
 

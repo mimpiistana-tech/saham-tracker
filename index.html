@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
 <meta name="theme-color" content="#07111f">
+<link rel="manifest" href="./manifest.json">
 
 <title>StockRadar Genius</title>
 
@@ -805,7 +806,11 @@ berapa persen mesin yang sudah aktif.
     </div>
 
     <div class="note">
-      Auto monitor: cek harga paper setiap 5 menit selama aplikasi aktif.
+      Auto monitor aktif saat aplikasi terbuka. Jika browser mendukung Background Sync / Periodic Sync, StockRadar juga mencoba memantau saat aplikasi tidak sedang dibuka.
+    </div>
+
+    <div id="backgroundStatus" class="note">
+      Background monitor: belum dicek.
     </div>
 
     <h2 style="margin-top:18px">📣 Riwayat Alert</h2>
@@ -958,6 +963,8 @@ function openAlerts(btn){
 
   renderAlerts();
   updateNotificationStatus();
+  updateBackgroundStatus();
+  importBackgroundAlerts();
 
   window.scrollTo({
     top: document.getElementById('alerts').offsetTop - 20,
@@ -1045,6 +1052,136 @@ function renderAlerts(){
       </div>
     </div>
   `).join('');
+}
+
+async function updateBackgroundStatus(){
+  const target =
+  document.getElementById('backgroundStatus');
+
+  if(!target) return;
+
+  if(!('serviceWorker' in navigator)){
+    target.textContent =
+    'Background monitor: service worker tidak didukung browser ini.';
+    return;
+  }
+
+  try{
+    const reg =
+    await navigator.serviceWorker.ready;
+
+    const supportsPeriodic =
+    'periodicSync' in reg;
+
+    const supportsSync =
+    'sync' in reg;
+
+    if(supportsPeriodic){
+      target.textContent =
+      'Background monitor: Periodic Sync tersedia ✅';
+    }else if(supportsSync){
+      target.textContent =
+      'Background monitor: Background Sync tersedia ✅';
+    }else{
+      target.textContent =
+      'Background monitor: browser membatasi pengecekan saat aplikasi ditutup.';
+    }
+  }catch(e){
+    target.textContent =
+    'Background monitor: belum siap.';
+  }
+}
+
+async function setupBackgroundMonitor(){
+  if(!('serviceWorker' in navigator)){
+    updateBackgroundStatus();
+    return;
+  }
+
+  try{
+    const reg =
+    await navigator.serviceWorker.register('./sw.js');
+
+    await syncPaperTradesToBackground(
+      getPaperTrades()
+    );
+
+    if('periodicSync' in reg){
+      try{
+        await reg.periodicSync.register(
+          'stockradar-paper-monitor',
+          {minInterval:15 * 60 * 1000}
+        );
+      }catch(e){
+        console.log('Periodic Sync not granted',e);
+      }
+    }
+
+    if('sync' in reg){
+      try{
+        await reg.sync.register(
+          'stockradar-paper-sync'
+        );
+      }catch(e){
+        console.log('Background Sync not granted',e);
+      }
+    }
+
+    updateBackgroundStatus();
+  }catch(e){
+    console.log('Service worker register failed',e);
+    updateBackgroundStatus();
+  }
+}
+
+async function importBackgroundAlerts(){
+  if(!('indexedDB' in window)){
+    return;
+  }
+
+  try{
+    const db =
+    await new Promise((resolve,reject)=>{
+      const req =
+      indexedDB.open('stockradar_background',1);
+
+      req.onsuccess = ()=>resolve(req.result);
+      req.onerror = ()=>reject(req.error);
+    });
+
+    const rows =
+    await new Promise((resolve,reject)=>{
+      const tx =
+      db.transaction('background_alerts','readonly');
+
+      const req =
+      tx.objectStore('background_alerts').getAll();
+
+      req.onsuccess = ()=>resolve(req.result || []);
+      req.onerror = ()=>reject(req.error);
+    });
+
+    if(!rows.length){
+      return;
+    }
+
+    const local =
+    getStockRadarAlerts();
+
+    const seen =
+    new Set(local.map(x=>x.event_key));
+
+    for(const item of rows){
+      if(!seen.has(item.event_key)){
+        local.unshift(item);
+      }
+    }
+
+    saveStockRadarAlerts(local);
+    renderAlerts();
+  }catch(e){
+    console.log('Import background alerts failed',e);
+  }
 }
 
 function updateNotificationStatus(){
@@ -1255,11 +1392,56 @@ function getPaperTrades(){
   }
 }
 
+async function syncPaperTradesToBackground(rows){
+  if(!('indexedDB' in window)){
+    return;
+  }
+
+  try{
+    const db =
+    await new Promise((resolve,reject)=>{
+      const req =
+      indexedDB.open('stockradar_background',1);
+
+      req.onupgradeneeded = ()=>{
+        const db = req.result;
+
+        if(!db.objectStoreNames.contains('paper_trades')){
+          db.createObjectStore('paper_trades',{keyPath:'id'});
+        }
+
+        if(!db.objectStoreNames.contains('background_alerts')){
+          db.createObjectStore('background_alerts',{keyPath:'event_key'});
+        }
+      };
+
+      req.onsuccess = ()=>resolve(req.result);
+      req.onerror = ()=>reject(req.error);
+    });
+
+    const tx =
+    db.transaction('paper_trades','readwrite');
+
+    const store =
+    tx.objectStore('paper_trades');
+
+    store.clear();
+
+    (rows || []).forEach(item=>{
+      store.put(item);
+    });
+  }catch(e){
+    console.log('Background sync storage error',e);
+  }
+}
+
 function savePaperTrades(rows){
   localStorage.setItem(
     'stockradar_paper_trades',
     JSON.stringify(rows)
   );
+
+  syncPaperTradesToBackground(rows);
 }
 
 function addPaperTrade(item){
@@ -2644,6 +2826,8 @@ loadCachedRadar();
 
 updateNotificationStatus();
 renderAlerts();
+setupBackgroundMonitor();
+importBackgroundAlerts();
 
 let paperAutoMonitorBusy = false;
 

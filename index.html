@@ -792,7 +792,13 @@ berapa persen mesin yang sudah aktif.
   <div class="card">
     <h2>🧪 Paper Trade</h2>
     <div class="note">
-      Simulasi tanpa uang asli. Posisi disimpan di HP ini untuk menguji konsistensi StockRadar.
+      Simulasi tanpa uang asli. Harga dipantau dari Yahoo Finance untuk menguji konsistensi StockRadar.
+    </div>
+    <button class="refresh" onclick="refreshAllPaperTrades()">
+      🔄 Update Harga Paper
+    </button>
+    <div id="paperSummary" class="note">
+      Belum ada statistik.
     </div>
     <div id="paperTrades">
       <div class="loading">Belum ada paper trade.</div>
@@ -874,6 +880,7 @@ function openPaperTrades(btn){
   btn.classList.add('active');
 
   renderPaperTrades();
+  refreshAllPaperTrades();
 
   window.scrollTo({
     top: document.getElementById('paper').offsetTop - 20,
@@ -924,6 +931,8 @@ function addPaperTrade(item){
     return;
   }
 
+  const createdAt = new Date();
+
   rows.unshift({
     id: Date.now(),
     ticker: item.ticker,
@@ -931,11 +940,15 @@ function addPaperTrade(item){
     tp1: Number(plan.tp1),
     tp2: Number(plan.tp2),
     cut_loss: Number(plan.cut_loss),
-    status: 'OPEN',
+    status: 'WAIT_ENTRY',
     setup: item.setup || '',
     scanner_score: Number(item.score || 0),
-    created_at: new Date().toISOString(),
-    source: plan.source || 'scanner_technical_only'
+    created_at: createdAt.toISOString(),
+    created_ts: Math.floor(createdAt.getTime() / 1000),
+    source: plan.source || 'scanner_technical_only',
+    last_price: Number(item.close || 0),
+    pnl_pct: null,
+    monitor_note: 'Menunggu harga masuk ke area entry.'
   });
 
   savePaperTrades(rows);
@@ -955,6 +968,10 @@ function closePaperTrade(id, result){
 
   item.status = result;
   item.closed_at = new Date().toISOString();
+  item.monitor_note =
+    result === 'TP'
+    ? 'Ditutup manual sebagai TP.'
+    : 'Ditutup manual sebagai CL.';
 
   savePaperTrades(rows);
   renderPaperTrades();
@@ -968,9 +985,114 @@ function deletePaperTrade(id){
   renderPaperTrades();
 }
 
+function paperStatusLabel(status){
+  const labels = {
+    WAIT_ENTRY: '⏳ WAIT ENTRY',
+    OPEN: '🟢 OPEN',
+    TP1_HIT: '✅ TP1 HIT',
+    TP2: '🏆 TP2',
+    CL: '🛑 CL',
+    TP: '✅ TP MANUAL'
+  };
+
+  return labels[status] || status || '-';
+}
+
+async function updatePaperTrade(item){
+  const createdTs =
+  Number(
+    item.created_ts ||
+    Math.floor(
+      new Date(item.created_at || Date.now()).getTime() / 1000
+    )
+  );
+
+  const url =
+  'https://saham-tracker-api.onrender.com/api/paper-check?ticker=' +
+  encodeURIComponent(item.ticker) +
+  '&since=' + encodeURIComponent(createdTs) +
+  '&entry=' + encodeURIComponent(item.entry) +
+  '&tp1=' + encodeURIComponent(item.tp1) +
+  '&tp2=' + encodeURIComponent(item.tp2) +
+  '&cl=' + encodeURIComponent(item.cut_loss);
+
+  const response =
+  await fetch(url,{cache:'no-store'});
+
+  if(!response.ok){
+    throw new Error('HTTP ' + response.status);
+  }
+
+  const data = await response.json();
+
+  return {
+    ...item,
+    created_ts: createdTs,
+    status: data.state || item.status,
+    last_price: Number(data.last_price || 0),
+    pnl_pct:
+      data.pnl_pct == null
+      ? null
+      : Number(data.pnl_pct),
+    monitor_note: data.note || '',
+    tp1_hit: Boolean(data.tp1_hit),
+    entry_triggered: Boolean(data.entry_triggered),
+    high_since: Number(data.high_since || 0),
+    low_since: Number(data.low_since || 0),
+    last_checked_at: data.checked_at || null,
+    auto_source: data.source || ''
+  };
+}
+
+async function refreshAllPaperTrades(){
+  const rows = getPaperTrades();
+
+  if(!rows.length){
+    renderPaperTrades();
+    return;
+  }
+
+  const target =
+  document.getElementById('paperTrades');
+
+  if(target){
+    target.innerHTML =
+    '<div class="loading">Memperbarui harga paper trade...</div>';
+  }
+
+  const updated = [];
+
+  for(const item of rows){
+    if(
+      ['TP2','CL','TP'].includes(item.status)
+    ){
+      updated.push(item);
+      continue;
+    }
+
+    try{
+      updated.push(
+        await updatePaperTrade(item)
+      );
+    }catch(error){
+      updated.push({
+        ...item,
+        monitor_note:
+          'Update harga gagal sementara. Data terakhir tetap disimpan.'
+      });
+    }
+  }
+
+  savePaperTrades(updated);
+  renderPaperTrades();
+}
+
 function renderPaperTrades(){
   const target =
   document.getElementById('paperTrades');
+
+  const summary =
+  document.getElementById('paperSummary');
 
   if(!target) return;
 
@@ -979,29 +1101,87 @@ function renderPaperTrades(){
   if(!rows.length){
     target.innerHTML =
     '<div class="loading">Belum ada paper trade.</div>';
+
+    if(summary){
+      summary.textContent = 'Belum ada statistik.';
+    }
+
     return;
   }
 
+  const wins =
+  rows.filter(x =>
+    ['TP2','TP'].includes(x.status)
+  ).length;
+
+  const tp1Hits =
+  rows.filter(x =>
+    x.status === 'TP1_HIT'
+  ).length;
+
+  const losses =
+  rows.filter(x =>
+    x.status === 'CL'
+  ).length;
+
+  const active =
+  rows.filter(x =>
+    ['WAIT_ENTRY','OPEN','TP1_HIT'].includes(x.status)
+  ).length;
+
+  if(summary){
+    summary.textContent =
+    'Aktif ' + active +
+    ' • TP/TP2 ' + wins +
+    ' • TP1 Hit ' + tp1Hits +
+    ' • CL ' + losses;
+  }
+
   target.innerHTML =
-  rows.map(x=>`
+  rows.map(x=>{
+    const pnl =
+    x.pnl_pct == null
+    ? '--'
+    : (
+        (Number(x.pnl_pct) >= 0 ? '+' : '') +
+        Number(x.pnl_pct).toFixed(2) + '%'
+      );
+
+    const pnlClass =
+    x.pnl_pct == null
+    ? 'yellow'
+    : Number(x.pnl_pct) >= 0
+      ? 'green'
+      : 'red';
+
+    const isActive =
+    ['WAIT_ENTRY','OPEN','TP1_HIT'].includes(x.status);
+
+    return `
     <div class="status-box">
       <div class="status-title">
-        ${x.ticker} • ${x.status}
+        ${x.ticker} • ${paperStatusLabel(x.status)}
       </div>
+
       <div class="status-value">
         Entry ${compactNumber(x.entry)}
+        • Harga ${compactNumber(x.last_price)}
+        • <span class="${pnlClass}">${pnl}</span>
       </div>
-      <div class="small" style="margin-top:6px;line-height:1.6">
+
+      <div class="small" style="margin-top:6px;line-height:1.7">
         TP1 ${compactNumber(x.tp1)}
         • TP2 ${compactNumber(x.tp2)}
         • CL ${compactNumber(x.cut_loss)}<br>
         Setup ${x.setup || '-'}
-        • Score ${Number(x.scanner_score || 0).toFixed(1)}
+        • Score ${Number(x.scanner_score || 0).toFixed(1)}<br>
+        ${x.monitor_note || 'Belum diperbarui.'}
       </div>
-      ${x.status === 'OPEN' ? `
+
+      ${isActive ? `
         <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-top:9px">
-          <button class="refresh" style="margin-top:0" onclick="closePaperTrade(${x.id},'TP')">✅ TP</button>
-          <button class="refresh" style="margin-top:0;background:#ffd166" onclick="closePaperTrade(${x.id},'CL')">⚠️ CL</button>
+          <button class="refresh" style="margin-top:0" onclick="refreshAllPaperTrades()">🔄 Harga</button>
+          <button class="refresh" style="margin-top:0;background:#ffd166" onclick="closePaperTrade(${x.id},'TP')">✅ Tutup TP</button>
           <button class="refresh" style="margin-top:0;background:#ff7180" onclick="deletePaperTrade(${x.id})">🗑️ Hapus</button>
         </div>
       ` : `
@@ -1010,7 +1190,8 @@ function renderPaperTrades(){
         </button>
       `}
     </div>
-  `).join('');
+    `;
+  }).join('');
 }
 
 function openTab(id,btn){

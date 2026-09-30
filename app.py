@@ -402,14 +402,7 @@ def extract_ohlcv_rows(payload):
     return rows
 
 
-def scan_one_ticker(ticker, date_to):
-    data, status, cache_state = get_ohlcv(ticker, date_to)
-
-    if status != 200:
-        return None
-
-    rows = extract_ohlcv_rows(data)
-
+def build_scanner_item_from_rows(ticker, rows, cache_state="HIST"):
     if len(rows) < 20:
         return None
 
@@ -495,7 +488,11 @@ def scan_one_ticker(ticker, date_to):
 
     entry_low = max(0.0, ma20 - (0.50 * atr14))
     entry_high = max(0.0, ma20 + (0.35 * atr14))
-    entry_mid = (entry_low + entry_high) / 2 if entry_high > 0 else close
+    entry_mid = (
+        (entry_low + entry_high) / 2
+        if entry_high > 0
+        else close
+    )
 
     paper_cut_loss = max(
         0.0,
@@ -529,6 +526,21 @@ def scan_one_ticker(ticker, date_to):
         },
         "cache": cache_state,
     }
+
+
+def scan_one_ticker(ticker, date_to):
+    data, status, cache_state = get_ohlcv(ticker, date_to)
+
+    if status != 200:
+        return None
+
+    rows = extract_ohlcv_rows(data)
+
+    return build_scanner_item_from_rows(
+        ticker,
+        rows,
+        cache_state,
+    )
 
 
 def build_scanner_reason(item):
@@ -677,6 +689,491 @@ def scanner():
         "top_picks": top_picks,
         "groups": groups,
         "results": actionable[:15],
+    })
+
+
+def get_historical_ohlcv(ticker, date_to, calendar_days=1000):
+    try:
+        end_date = datetime.strptime(date_to, "%Y-%m-%d").date()
+    except ValueError:
+        return {
+            "success": False,
+            "error": "Format tanggal harus YYYY-MM-DD",
+        }, 400, "MISS"
+
+    calendar_days = max(240, min(int(calendar_days), 1800))
+    start_date = end_date - timedelta(days=calendar_days)
+    symbol = f"{ticker}.JK"
+
+    cache_key = (
+        f"replay_ohlcv_{symbol}_"
+        f"{start_date.isoformat()}_{end_date.isoformat()}"
+    )
+
+    cached, cache_state = cache_get(cache_key)
+
+    if cached and cache_state == "HIT":
+        return cached["data"], cached["status"], "HIT"
+
+    period1 = int(
+        datetime.combine(start_date, datetime.min.time()).timestamp()
+    )
+    period2 = int(
+        datetime.combine(
+            end_date + timedelta(days=1),
+            datetime.min.time(),
+        ).timestamp()
+    )
+
+    try:
+        response = requests.get(
+            f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}",
+            params={
+                "period1": period1,
+                "period2": period2,
+                "interval": "1d",
+                "events": "history",
+                "includeAdjustedClose": "true",
+            },
+            headers={
+                "User-Agent": "Mozilla/5.0 StockRadar/1.0",
+                "accept": "application/json",
+            },
+            timeout=25,
+        )
+
+        if response.status_code != 200:
+            return {
+                "success": False,
+                "error": f"Yahoo historical replay HTTP {response.status_code}",
+            }, response.status_code, "MISS"
+
+        payload = response.json()
+        chart = payload.get("chart") or {}
+        results = chart.get("result") or []
+
+        if not results:
+            return {
+                "success": False,
+                "error": "Yahoo historical replay tidak menemukan data",
+            }, 404, "MISS"
+
+        result = results[0]
+        timestamps = result.get("timestamp") or []
+        quote_list = (
+            (result.get("indicators") or {}).get("quote") or [{}]
+        )
+        quote = quote_list[0] if quote_list else {}
+
+        opens = quote.get("open") or []
+        highs = quote.get("high") or []
+        lows = quote.get("low") or []
+        closes = quote.get("close") or []
+        volumes = quote.get("volume") or []
+
+        rows = []
+
+        for i, ts in enumerate(timestamps):
+            close = closes[i] if i < len(closes) else None
+
+            if close is None:
+                continue
+
+            rows.append({
+                "date": datetime.utcfromtimestamp(ts).date().isoformat(),
+                "open": opens[i] if i < len(opens) else None,
+                "high": highs[i] if i < len(highs) else None,
+                "low": lows[i] if i < len(lows) else None,
+                "close": close,
+                "volume": volumes[i] if i < len(volumes) else None,
+            })
+
+        data = {
+            "success": True,
+            "source": "yahoo_finance",
+            "symbol": symbol,
+            "data": rows,
+        }
+
+        cache_put(cache_key, data, 200)
+        return data, 200, "MISS"
+
+    except Exception as e:
+        return {
+            "success": False,
+            "error": f"Yahoo historical replay error: {e}",
+        }, 500, "MISS"
+
+
+def simulate_historical_trade(rows, signal_index, item, entry_wait, max_hold):
+    plan = item.get("paper_plan") or {}
+
+    entry = float(plan.get("entry") or 0)
+    cut_loss = float(plan.get("cut_loss") or 0)
+    tp1 = float(plan.get("tp1") or 0)
+    tp2 = float(plan.get("tp2") or 0)
+
+    if not (
+        entry > 0
+        and cut_loss > 0
+        and tp1 > entry
+        and tp2 > tp1
+        and cut_loss < entry
+    ):
+        return {
+            "entered": False,
+            "end_index": signal_index,
+            "reason": "invalid_plan",
+        }
+
+    first_future = signal_index + 1
+    last_entry_index = min(
+        len(rows) - 1,
+        signal_index + max(1, entry_wait),
+    )
+
+    entry_index = None
+
+    for j in range(first_future, last_entry_index + 1):
+        row = rows[j]
+        high = float(row.get("high") or row.get("close") or 0)
+        low = float(row.get("low") or row.get("close") or 0)
+
+        if low <= entry <= high:
+            entry_index = j
+            break
+
+    if entry_index is None:
+        return {
+            "entered": False,
+            "end_index": last_entry_index,
+            "reason": "entry_not_touched",
+        }
+
+    tp1_hit = False
+    exit_status = "TIME"
+    exit_price = None
+    exit_index = entry_index
+
+    last_hold_index = min(
+        len(rows) - 1,
+        entry_index + max(1, max_hold) - 1,
+    )
+
+    for j in range(entry_index, last_hold_index + 1):
+        row = rows[j]
+        high = float(row.get("high") or row.get("close") or 0)
+        low = float(row.get("low") or row.get("close") or 0)
+
+        # Daily candle cannot reveal intraday ordering.
+        # Conservative tie-break: CL is evaluated before TP on the same candle.
+        if low <= cut_loss:
+            exit_status = "CL"
+            exit_price = cut_loss
+            exit_index = j
+            break
+
+        if high >= tp1:
+            tp1_hit = True
+
+        if high >= tp2:
+            exit_status = "TP2"
+            exit_price = tp2
+            exit_index = j
+            break
+
+        exit_index = j
+
+    if exit_price is None:
+        exit_price = float(
+            rows[exit_index].get("close") or entry
+        )
+
+    pnl_pct = (
+        ((exit_price / entry) - 1) * 100
+        if entry > 0
+        else 0.0
+    )
+
+    return {
+        "entered": True,
+        "end_index": exit_index,
+        "trade": {
+            "ticker": item.get("ticker"),
+            "signal_date": rows[signal_index].get("date"),
+            "entry_date": rows[entry_index].get("date"),
+            "exit_date": rows[exit_index].get("date"),
+            "setup": item.get("setup"),
+            "score": float(item.get("score") or 0),
+            "trend_score": float(item.get("trend_score") or 0),
+            "volume_score": float(item.get("volume_score") or 0),
+            "risk_score": float(item.get("risk_score") or 0),
+            "entry": round(entry, 2),
+            "cut_loss": round(cut_loss, 2),
+            "tp1": round(tp1, 2),
+            "tp2": round(tp2, 2),
+            "exit_price": round(exit_price, 2),
+            "status": exit_status,
+            "tp1_hit": tp1_hit,
+            "pnl_pct": round(pnl_pct, 4),
+            "hold_sessions": (exit_index - entry_index) + 1,
+        },
+    }
+
+
+def summarize_historical_trades(trades):
+    total = len(trades)
+
+    pnl_values = [
+        float(x.get("pnl_pct") or 0)
+        for x in trades
+    ]
+
+    wins = [x for x in pnl_values if x > 0]
+    losses = [x for x in pnl_values if x < 0]
+
+    win_rate = (
+        (len(wins) / total) * 100
+        if total else None
+    )
+
+    expectancy = (
+        sum(pnl_values) / total
+        if total else None
+    )
+
+    gross_profit = sum(wins)
+    gross_loss = abs(sum(losses))
+
+    profit_factor = (
+        gross_profit / gross_loss
+        if gross_loss > 0
+        else None
+    )
+
+    cumulative = 0.0
+    peak = 0.0
+    max_drawdown = 0.0
+
+    for pnl in pnl_values:
+        cumulative += pnl
+        peak = max(peak, cumulative)
+        max_drawdown = max(
+            max_drawdown,
+            peak - cumulative,
+        )
+
+    tp1_hits = sum(
+        1 for x in trades
+        if x.get("tp1_hit")
+    )
+
+    return {
+        "trades": total,
+        "wins": len(wins),
+        "losses": len(losses),
+        "win_rate": (
+            round(win_rate, 2)
+            if win_rate is not None
+            else None
+        ),
+        "expectancy": (
+            round(expectancy, 4)
+            if expectancy is not None
+            else None
+        ),
+        "profit_factor": (
+            round(profit_factor, 4)
+            if profit_factor is not None
+            else None
+        ),
+        "max_drawdown": round(max_drawdown, 4),
+        "cumulative_pnl": round(cumulative, 4),
+        "tp1_hit_rate": (
+            round((tp1_hits / total) * 100, 2)
+            if total else None
+        ),
+    }
+
+
+@app.route("/api/historical-replay")
+def historical_replay():
+    ticker = request.args.get("ticker", "").upper().strip()
+    date_to = request.args.get("to")
+
+    try:
+        lookback_sessions = int(
+            request.args.get("sessions", "300")
+        )
+        max_trades = int(
+            request.args.get("max_trades", "50")
+        )
+        entry_wait = int(
+            request.args.get("entry_wait", "5")
+        )
+        max_hold = int(
+            request.args.get("max_hold", "20")
+        )
+    except ValueError:
+        return jsonify({
+            "success": False,
+            "error": "Parameter replay harus berupa angka",
+        }), 400
+
+    if not ticker or not date_to:
+        return jsonify({
+            "success": False,
+            "error": "ticker dan to wajib diisi",
+        }), 400
+
+    try:
+        datetime.strptime(date_to, "%Y-%m-%d")
+    except ValueError:
+        return jsonify({
+            "success": False,
+            "error": "Format tanggal harus YYYY-MM-DD",
+        }), 400
+
+    lookback_sessions = max(
+        80,
+        min(lookback_sessions, 600),
+    )
+    max_trades = max(
+        5,
+        min(max_trades, 100),
+    )
+    entry_wait = max(
+        1,
+        min(entry_wait, 10),
+    )
+    max_hold = max(
+        3,
+        min(max_hold, 60),
+    )
+
+    calendar_days = min(
+        1800,
+        max(
+            500,
+            int(lookback_sessions * 2.2) + 260,
+        ),
+    )
+
+    data, status, cache_state = get_historical_ohlcv(
+        ticker,
+        date_to,
+        calendar_days,
+    )
+
+    if status != 200:
+        return jsonify(data), status
+
+    rows = extract_ohlcv_rows(data)
+
+    if len(rows) < 80:
+        return jsonify({
+            "success": False,
+            "error": "Data historis belum cukup untuk replay",
+        }), 422
+
+    start_index = max(
+        60,
+        len(rows) - lookback_sessions,
+    )
+
+    trades = []
+    signals_seen = 0
+    expired_signals = 0
+    i = start_index
+
+    while i < len(rows) - 1 and len(trades) < max_trades:
+        history = rows[:i + 1]
+
+        item = build_scanner_item_from_rows(
+            ticker,
+            history,
+            "REPLAY",
+        )
+
+        if (
+            not item
+            or item.get("setup") not in {
+                "Momentum",
+                "Watch Pullback",
+                "Early Watch",
+            }
+            or float(item.get("score") or 0) < 55
+        ):
+            i += 1
+            continue
+
+        signals_seen += 1
+
+        simulation = simulate_historical_trade(
+            rows,
+            i,
+            item,
+            entry_wait,
+            max_hold,
+        )
+
+        if simulation.get("entered"):
+            trades.append(simulation["trade"])
+        else:
+            expired_signals += 1
+
+        next_index = int(
+            simulation.get("end_index", i)
+        )
+
+        i = max(
+            i + 1,
+            next_index + 1,
+        )
+
+    summary = summarize_historical_trades(trades)
+
+    setup_summary = {}
+
+    for setup in [
+        "Momentum",
+        "Watch Pullback",
+        "Early Watch",
+    ]:
+        setup_trades = [
+            x for x in trades
+            if x.get("setup") == setup
+        ]
+
+        if setup_trades:
+            setup_summary[setup] = (
+                summarize_historical_trades(setup_trades)
+            )
+
+    return jsonify({
+        "success": True,
+        "ticker": ticker,
+        "date_to": date_to,
+        "source": "Yahoo Finance daily OHLCV",
+        "cache": cache_state,
+        "settings": {
+            "lookback_sessions": lookback_sessions,
+            "max_trades": max_trades,
+            "entry_wait_sessions": entry_wait,
+            "max_hold_sessions": max_hold,
+        },
+        "assumptions": [
+            "Sinyal dibuat setelah candle harian selesai; entry baru boleh mulai hari berikutnya.",
+            "Jika CL dan target sama-sama tersentuh pada candle harian yang sama, replay memilih CL (asumsi konservatif).",
+            "Replay teknikal tidak memakai broker summary IndexAlpha.",
+            "Biaya transaksi, slippage, antrean order, dan corporate action belum dimasukkan.",
+            "Historical replay tidak menggantikan forward Paper Trade.",
+        ],
+        "signals_seen": signals_seen,
+        "expired_signals": expired_signals,
+        "summary": summary,
+        "setup_summary": setup_summary,
+        "trades": trades,
     })
 
 

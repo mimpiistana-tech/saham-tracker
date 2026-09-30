@@ -853,6 +853,12 @@ berapa persen mesin yang sudah aktif.
       Simulasi event: belum dijalankan.
     </div>
 
+    <button class="refresh"
+      style="margin-top:10px;background:#ff7180"
+      onclick="clearSimulationAlerts()">
+      🧹 Hapus Alert Simulasi
+    </button>
+
     <h2 style="margin-top:18px">📣 Riwayat Alert</h2>
     <div id="alertHistory">
       <div class="loading">Belum ada alert.</div>
@@ -1043,6 +1049,10 @@ function addStockRadarAlert(item, title, message, eventKey){
     ticker: item.ticker,
     title,
     message,
+    source:
+      String(eventKey || '').startsWith('SIM:')
+      ? 'TEST'
+      : 'REAL',
     created_at: new Date().toISOString()
   };
 
@@ -1105,10 +1115,32 @@ function renderAlerts(){
   }
 
   target.innerHTML =
-  rows.map(x=>`
+  rows.map(x=>{
+    const source =
+    x.source ||
+    (
+      String(x.event_key || '').startsWith('SIM:')
+      ? 'TEST'
+      : 'REAL'
+    );
+
+    const badgeClass =
+    source === 'REAL'
+    ? 'badge'
+    : 'badge badge-red';
+
+    const badgeText =
+    source === 'REAL'
+    ? '🟢 REAL'
+    : '🧪 TEST';
+
+    return `
     <div class="status-box">
       <div class="status-title">
         ${x.ticker} • ${new Date(x.created_at).toLocaleString('id-ID')}
+        <span class="${badgeClass}" style="margin-left:6px">
+          ${badgeText}
+        </span>
       </div>
       <div class="status-value">
         ${x.title}
@@ -1117,7 +1149,8 @@ function renderAlerts(){
         ${x.message}
       </div>
     </div>
-  `).join('');
+    `;
+  }).join('');
 }
 
 async function updateBackgroundStatus(){
@@ -1588,6 +1621,85 @@ async function testStockRadarNotification(){
         'Tes notifikasi: gagal dikirim.';
       }
     }
+  }
+}
+
+async function clearSimulationAlerts(){
+  const status =
+  document.getElementById('simAlertStatus');
+
+  const rows =
+  getStockRadarAlerts();
+
+  const cleaned =
+  rows.filter(x =>
+    !(
+      x.source === 'TEST' ||
+      String(x.event_key || '').startsWith('SIM:')
+    )
+  );
+
+  saveStockRadarAlerts(cleaned);
+  renderAlerts();
+
+  if('indexedDB' in window){
+    let db = null;
+
+    try{
+      db =
+      await new Promise((resolve,reject)=>{
+        const req =
+        indexedDB.open('stockradar_background',2);
+
+        req.onsuccess = ()=>resolve(req.result);
+        req.onerror = ()=>reject(req.error);
+      });
+
+      if(db.objectStoreNames.contains('background_alerts')){
+        const testRows =
+        await new Promise((resolve,reject)=>{
+          const tx =
+          db.transaction('background_alerts','readonly');
+
+          const req =
+          tx.objectStore('background_alerts').getAll();
+
+          req.onsuccess = ()=>resolve(req.result || []);
+          req.onerror = ()=>reject(req.error);
+        });
+
+        await new Promise((resolve,reject)=>{
+          const tx =
+          db.transaction('background_alerts','readwrite');
+
+          const store =
+          tx.objectStore('background_alerts');
+
+          testRows
+          .filter(x =>
+            x.source === 'TEST' ||
+            String(x.event_key || '').startsWith('SIM:')
+          )
+          .forEach(x =>
+            store.delete(x.event_key)
+          );
+
+          tx.oncomplete = ()=>resolve();
+          tx.onerror = ()=>reject(tx.error);
+        });
+      }
+    }catch(e){
+      console.log('Clear simulation background alerts error',e);
+    }finally{
+      if(db){
+        db.close();
+      }
+    }
+  }
+
+  if(status){
+    status.textContent =
+    'Alert simulasi sudah dibersihkan ✅';
   }
 }
 

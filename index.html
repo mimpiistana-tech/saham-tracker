@@ -788,6 +788,18 @@ berapa persen mesin yang sudah aktif.
   </div>
 </section>
 
+<section id="paper" class="section">
+  <div class="card">
+    <h2>🧪 Paper Trade</h2>
+    <div class="note">
+      Simulasi tanpa uang asli. Posisi disimpan di HP ini untuk menguji konsistensi StockRadar.
+    </div>
+    <div id="paperTrades">
+      <div class="loading">Belum ada paper trade.</div>
+    </div>
+  </div>
+</section>
+
 </div>
 
 
@@ -812,9 +824,10 @@ Scanner
 Alert
 </div>
 
-<div class="nav-item">
-<span class="nav-icon">⭐</span>
-Watchlist
+<div class="nav-item"
+onclick="openPaperTrades(this)">
+<span class="nav-icon">🧪</span>
+Paper
 </div>
 
 </div>
@@ -843,6 +856,149 @@ function openBottomNav(id,btn){
     top: document.getElementById(id).offsetTop - 20,
     behavior:'smooth'
   });
+}
+
+function openPaperTrades(btn){
+  document
+  .querySelectorAll('.section')
+  .forEach(x=>x.classList.remove('active-section'));
+
+  document
+  .getElementById('paper')
+  .classList.add('active-section');
+
+  document
+  .querySelectorAll('.nav-item')
+  .forEach(x=>x.classList.remove('active'));
+
+  btn.classList.add('active');
+
+  renderPaperTrades();
+
+  window.scrollTo({
+    top: document.getElementById('paper').offsetTop - 20,
+    behavior:'smooth'
+  });
+}
+
+function getPaperTrades(){
+  try{
+    return JSON.parse(
+      localStorage.getItem('stockradar_paper_trades') || '[]'
+    );
+  }catch(e){
+    return [];
+  }
+}
+
+function savePaperTrades(rows){
+  localStorage.setItem(
+    'stockradar_paper_trades',
+    JSON.stringify(rows)
+  );
+}
+
+function addPaperTrade(item){
+  const plan = item.paper_plan || {};
+
+  if(!plan.entry){
+    alert('Paper plan belum tersedia untuk saham ini.');
+    return;
+  }
+
+  const rows = getPaperTrades();
+
+  const exists = rows.some(
+    x => x.ticker === item.ticker && x.status === 'OPEN'
+  );
+
+  if(exists){
+    alert(item.ticker + ' sudah ada sebagai paper trade aktif.');
+    return;
+  }
+
+  rows.unshift({
+    id: Date.now(),
+    ticker: item.ticker,
+    entry: Number(plan.entry),
+    tp1: Number(plan.tp1),
+    tp2: Number(plan.tp2),
+    cut_loss: Number(plan.cut_loss),
+    status: 'OPEN',
+    setup: item.setup || '',
+    scanner_score: Number(item.score || 0),
+    created_at: new Date().toISOString(),
+    source: plan.source || 'scanner_technical_only'
+  });
+
+  savePaperTrades(rows);
+  alert('Paper trade ' + item.ticker + ' disimpan.');
+}
+
+function closePaperTrade(id, result){
+  const rows = getPaperTrades();
+  const item = rows.find(x => x.id === id);
+
+  if(!item) return;
+
+  item.status = result;
+  item.closed_at = new Date().toISOString();
+
+  savePaperTrades(rows);
+  renderPaperTrades();
+}
+
+function deletePaperTrade(id){
+  const rows = getPaperTrades()
+  .filter(x => x.id !== id);
+
+  savePaperTrades(rows);
+  renderPaperTrades();
+}
+
+function renderPaperTrades(){
+  const target =
+  document.getElementById('paperTrades');
+
+  if(!target) return;
+
+  const rows = getPaperTrades();
+
+  if(!rows.length){
+    target.innerHTML =
+    '<div class="loading">Belum ada paper trade.</div>';
+    return;
+  }
+
+  target.innerHTML =
+  rows.map(x=>`
+    <div class="status-box">
+      <div class="status-title">
+        ${x.ticker} • ${x.status}
+      </div>
+      <div class="status-value">
+        Entry ${compactNumber(x.entry)}
+      </div>
+      <div class="small" style="margin-top:6px;line-height:1.6">
+        TP1 ${compactNumber(x.tp1)}
+        • TP2 ${compactNumber(x.tp2)}
+        • CL ${compactNumber(x.cut_loss)}<br>
+        Setup ${x.setup || '-'}
+        • Score ${Number(x.scanner_score || 0).toFixed(1)}
+      </div>
+      ${x.status === 'OPEN' ? `
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-top:9px">
+          <button class="refresh" style="margin-top:0" onclick="closePaperTrade(${x.id},'TP')">✅ TP</button>
+          <button class="refresh" style="margin-top:0;background:#ffd166" onclick="closePaperTrade(${x.id},'CL')">⚠️ CL</button>
+          <button class="refresh" style="margin-top:0;background:#ff7180" onclick="deletePaperTrade(${x.id})">🗑️ Hapus</button>
+        </div>
+      ` : `
+        <button class="refresh" style="margin-top:9px;background:#ff7180" onclick="deletePaperTrade(${x.id})">
+          🗑️ Hapus
+        </button>
+      `}
+    </div>
+  `).join('');
 }
 
 function openTab(id,btn){
@@ -1357,11 +1513,18 @@ async function runScanner(){
             Harga ${compactNumber(x.close)}
             • Area entry awal ${compactNumber(x.entry_low)}-${compactNumber(x.entry_high)}
           </div>
-          <button class="refresh"
-            style="margin-top:9px"
-            onclick="analyzeCandidate('${x.ticker}')">
-            Analisa Full ${x.ticker}
-          </button>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:9px">
+            <button class="refresh"
+              style="margin-top:0"
+              onclick='addPaperTrade(${JSON.stringify(x)})'>
+              🧪 Paper Trade
+            </button>
+            <button class="refresh"
+              style="margin-top:0"
+              onclick="analyzeCandidate('${x.ticker}')">
+              Analisa Full
+            </button>
+          </div>
         </div>
       `).join('')}
     `
@@ -1399,11 +1562,18 @@ async function runScanner(){
           Harga ${compactNumber(x.close)}
           • Area entry awal ${compactNumber(x.entry_low)}-${compactNumber(x.entry_high)}
         </div>
-        <button class="refresh"
-          style="margin-top:9px"
-          onclick="analyzeCandidate('${x.ticker}')">
-          Analisa Full ${x.ticker}
-        </button>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:9px">
+          <button class="refresh"
+            style="margin-top:0"
+            onclick='addPaperTrade(${JSON.stringify(x)})'>
+            🧪 Paper Trade
+          </button>
+          <button class="refresh"
+            style="margin-top:0"
+            onclick="analyzeCandidate('${x.ticker}')">
+            Analisa Full
+          </button>
+        </div>
       </div>
     `).join('');
 

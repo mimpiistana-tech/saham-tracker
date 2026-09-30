@@ -905,6 +905,60 @@ berapa persen mesin yang sudah aktif.
     <button class="refresh" onclick="refreshAllPaperTrades()">
       🔄 Update Harga Paper
     </button>
+
+    <h2 style="margin-top:18px">🛡️ Risk Engine</h2>
+    <div class="note">
+      Hitung lot dari modal simulasi, batas risiko per trade, jarak Entry–CL, dan jumlah slot posisi.
+      Perhitungan ini hanya untuk Paper Trade.
+    </div>
+
+    <div class="status-box">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+        <label class="small">
+          Modal simulasi (Rp)
+          <input id="riskCapitalInput"
+            type="number"
+            min="100000"
+            step="100000"
+            value="10000000"
+            style="width:100%;margin-top:6px;padding:11px;border-radius:10px;border:1px solid #193c59;background:#071827;color:#edf6ff;box-sizing:border-box">
+        </label>
+
+        <label class="small">
+          Risiko / trade (%)
+          <input id="riskPctInput"
+            type="number"
+            min="0.1"
+            max="10"
+            step="0.1"
+            value="1"
+            style="width:100%;margin-top:6px;padding:11px;border-radius:10px;border:1px solid #193c59;background:#071827;color:#edf6ff;box-sizing:border-box">
+        </label>
+
+        <label class="small" style="grid-column:1/-1">
+          Maksimum posisi aktif
+          <input id="riskMaxPositionsInput"
+            type="number"
+            min="1"
+            max="10"
+            step="1"
+            value="3"
+            style="width:100%;margin-top:6px;padding:11px;border-radius:10px;border:1px solid #193c59;background:#071827;color:#edf6ff;box-sizing:border-box">
+        </label>
+      </div>
+
+      <button id="riskSaveBtn"
+        class="refresh"
+        style="margin-top:10px"
+        onclick="saveRiskSettings()">
+        💾 Terapkan Risk
+      </button>
+
+      <div id="riskEngineSummary" class="small" style="margin-top:9px;line-height:1.7">
+        Risk Engine belum dihitung.
+      </div>
+    </div>
+
     <div id="paperSummary" class="note">
       Belum ada statistik.
     </div>
@@ -2084,6 +2138,7 @@ function openPaperTrades(btn){
 
   btn.classList.add('active');
 
+  loadRiskSettingsToInputs();
   renderPaperTrades();
   refreshAllPaperTrades();
 
@@ -2241,6 +2296,359 @@ function savePaperTrades(rows){
   syncPaperTradesToBackground(rows);
 }
 
+const RISK_ENGINE_KEY =
+'stockradar_risk_engine_v1';
+
+function clampRiskNumber(value,min,max,fallback){
+  const number = Number(value);
+
+  if(!Number.isFinite(number)){
+    return fallback;
+  }
+
+  return Math.min(
+    max,
+    Math.max(min,number)
+  );
+}
+
+function getRiskSettings(){
+  const defaults = {
+    capital:10000000,
+    riskPct:1,
+    maxPositions:3
+  };
+
+  try{
+    const raw =
+    JSON.parse(
+      localStorage.getItem(RISK_ENGINE_KEY) || '{}'
+    );
+
+    return {
+      capital:clampRiskNumber(
+        raw.capital,
+        100000,
+        1000000000000,
+        defaults.capital
+      ),
+      riskPct:clampRiskNumber(
+        raw.riskPct,
+        0.1,
+        10,
+        defaults.riskPct
+      ),
+      maxPositions:Math.round(
+        clampRiskNumber(
+          raw.maxPositions,
+          1,
+          10,
+          defaults.maxPositions
+        )
+      )
+    };
+  }catch(e){
+    return defaults;
+  }
+}
+
+function formatRupiah(value){
+  return 'Rp' +
+  Math.round(Number(value || 0))
+  .toLocaleString('id-ID');
+}
+
+function loadRiskSettingsToInputs(){
+  const settings =
+  getRiskSettings();
+
+  const capital =
+  document.getElementById('riskCapitalInput');
+
+  const riskPct =
+  document.getElementById('riskPctInput');
+
+  const maxPositions =
+  document.getElementById('riskMaxPositionsInput');
+
+  if(capital){
+    capital.value =
+    Math.round(settings.capital);
+  }
+
+  if(riskPct){
+    riskPct.value =
+    Number(settings.riskPct.toFixed(2));
+  }
+
+  if(maxPositions){
+    maxPositions.value =
+    settings.maxPositions;
+  }
+}
+
+function readRiskSettingsFromInputs(){
+  const current =
+  getRiskSettings();
+
+  const capital =
+  document.getElementById('riskCapitalInput');
+
+  const riskPct =
+  document.getElementById('riskPctInput');
+
+  const maxPositions =
+  document.getElementById('riskMaxPositionsInput');
+
+  return {
+    capital:clampRiskNumber(
+      capital?.value,
+      100000,
+      1000000000000,
+      current.capital
+    ),
+    riskPct:clampRiskNumber(
+      riskPct?.value,
+      0.1,
+      10,
+      current.riskPct
+    ),
+    maxPositions:Math.round(
+      clampRiskNumber(
+        maxPositions?.value,
+        1,
+        10,
+        current.maxPositions
+      )
+    )
+  };
+}
+
+function saveRiskSettings(){
+  const settings =
+  readRiskSettingsFromInputs();
+
+  localStorage.setItem(
+    RISK_ENGINE_KEY,
+    JSON.stringify(settings)
+  );
+
+  loadRiskSettingsToInputs();
+  renderPaperTrades();
+
+  const button =
+  document.getElementById('riskSaveBtn');
+
+  if(button){
+    const oldText =
+    button.textContent;
+
+    button.textContent =
+    '✅ Risk diterapkan';
+
+    setTimeout(()=>{
+      button.textContent =
+      oldText;
+    },1200);
+  }
+}
+
+function calculateRiskPlan(item,settings=getRiskSettings()){
+  const entry =
+  Number(item?.entry || 0);
+
+  const cutLoss =
+  Number(item?.cut_loss || 0);
+
+  const tp1 =
+  Number(item?.tp1 || 0);
+
+  const tp2 =
+  Number(item?.tp2 || 0);
+
+  const capital =
+  Number(settings.capital || 0);
+
+  const maxPositions =
+  Math.max(
+    1,
+    Number(settings.maxPositions || 1)
+  );
+
+  const riskBudget =
+  capital *
+  Number(settings.riskPct || 0) / 100;
+
+  const slotCapital =
+  capital / maxPositions;
+
+  const riskPerShare =
+  entry - cutLoss;
+
+  if(
+    entry <= 0 ||
+    cutLoss <= 0 ||
+    riskPerShare <= 0 ||
+    riskBudget <= 0 ||
+    slotCapital <= 0
+  ){
+    return {
+      valid:false,
+      lots:0,
+      reason:'Entry/CL belum valid untuk hitung risk.'
+    };
+  }
+
+  const riskPerLot =
+  riskPerShare * 100;
+
+  const costPerLot =
+  entry * 100;
+
+  const lotsByRisk =
+  Math.max(
+    0,
+    Math.floor(riskBudget / riskPerLot)
+  );
+
+  const lotsByCapital =
+  Math.max(
+    0,
+    Math.floor(slotCapital / costPerLot)
+  );
+
+  const lots =
+  Math.max(
+    0,
+    Math.min(
+      lotsByRisk,
+      lotsByCapital
+    )
+  );
+
+  const shares =
+  lots * 100;
+
+  const positionValue =
+  shares * entry;
+
+  const maxLoss =
+  shares * riskPerShare;
+
+  const tp1Profit =
+  tp1 > entry
+  ? shares * (tp1 - entry)
+  : 0;
+
+  const tp2Profit =
+  tp2 > entry
+  ? shares * (tp2 - entry)
+  : 0;
+
+  const rr1 =
+  tp1 > entry
+  ? (tp1 - entry) / riskPerShare
+  : null;
+
+  const rr2 =
+  tp2 > entry
+  ? (tp2 - entry) / riskPerShare
+  : null;
+
+  return {
+    valid:true,
+    lots,
+    shares,
+    positionValue,
+    maxLoss,
+    tp1Profit,
+    tp2Profit,
+    rr1,
+    rr2,
+    riskBudget,
+    slotCapital,
+    lotsByRisk,
+    lotsByCapital,
+    limitingFactor:
+      lotsByRisk <= lotsByCapital
+      ? 'batas risiko'
+      : 'slot modal',
+    actualRiskPct:
+      capital > 0
+      ? (maxLoss / capital) * 100
+      : 0
+  };
+}
+
+function renderRiskEngineSummary(activeRows){
+  const target =
+  document.getElementById('riskEngineSummary');
+
+  if(!target){
+    return;
+  }
+
+  const settings =
+  getRiskSettings();
+
+  const rows =
+  Array.isArray(activeRows)
+  ? activeRows
+  : getPaperTrades().filter(x =>
+      ['WAIT_ENTRY','OPEN','TP1_HIT'].includes(x.status)
+    );
+
+  const plans =
+  rows
+  .map(x => calculateRiskPlan(x,settings))
+  .filter(x => x.valid && x.lots > 0);
+
+  const totalPositionValue =
+  plans.reduce(
+    (sum,x)=>sum + x.positionValue,
+    0
+  );
+
+  const totalMaxLoss =
+  plans.reduce(
+    (sum,x)=>sum + x.maxLoss,
+    0
+  );
+
+  const riskBudget =
+  settings.capital *
+  settings.riskPct / 100;
+
+  const slotCapital =
+  settings.capital /
+  settings.maxPositions;
+
+  const totalRiskPct =
+  settings.capital > 0
+  ? (totalMaxLoss / settings.capital) * 100
+  : 0;
+
+  const overSlot =
+  rows.length > settings.maxPositions;
+
+  target.innerHTML =
+  'Modal ' + formatRupiah(settings.capital) +
+  ' • Risk/trade ' + Number(settings.riskPct).toFixed(1) + '%' +
+  ' = ' + formatRupiah(riskBudget) + '<br>' +
+  'Slot ' + settings.maxPositions +
+  ' • Batas modal/posisi ' + formatRupiah(slotCapital) + '<br>' +
+  'Rencana aktif ' + rows.length +
+  ' • Dana teralokasi ' + formatRupiah(totalPositionValue) + '<br>' +
+  'Risiko total bila semua kena CL ' +
+  formatRupiah(totalMaxLoss) +
+  ' (' + totalRiskPct.toFixed(2) + '% modal)' +
+  (
+    overSlot
+    ? '<br><span class="red">⚠️ Posisi aktif melebihi batas slot. Posisi baru akan diblokir.</span>'
+    : ''
+  );
+}
+
 function addPaperTradesBatch(items){
   const candidates =
   Array.isArray(items)
@@ -2265,9 +2673,20 @@ function addPaperTradesBatch(items){
     .map(x => x.ticker)
   );
 
+  const riskSettings =
+  getRiskSettings();
+
+  let availableSlots =
+  Math.max(
+    0,
+    riskSettings.maxPositions -
+    activeTickers.size
+  );
+
   let added = 0;
   let skipped = 0;
   let unavailable = 0;
+  let slotLimited = 0;
 
   candidates.forEach((item,index)=>{
     const plan =
@@ -2280,6 +2699,11 @@ function addPaperTradesBatch(items){
 
     if(activeTickers.has(item.ticker)){
       skipped += 1;
+      return;
+    }
+
+    if(availableSlots <= 0){
+      slotLimited += 1;
       return;
     }
 
@@ -2307,6 +2731,7 @@ function addPaperTradesBatch(items){
     });
 
     activeTickers.add(item.ticker);
+    availableSlots -= 1;
     added += 1;
   });
 
@@ -2319,6 +2744,7 @@ function addPaperTradesBatch(items){
     status.textContent =
     'TOP 3 → ditambahkan ' + added +
     ' • sudah aktif ' + skipped +
+    ' • slot penuh ' + slotLimited +
     ' • plan belum tersedia ' + unavailable;
   }
 
@@ -2364,6 +2790,29 @@ function addPaperTrade(item){
     if(paperNav){
       openPaperTrades(paperNav);
     }
+    return;
+  }
+
+  const activeCount =
+  rows.filter(x =>
+    activeStatuses.has(x.status)
+  ).length;
+
+  const riskSettings =
+  getRiskSettings();
+
+  if(activeCount >= riskSettings.maxPositions){
+    alert(
+      'Risk Engine: slot posisi penuh (' +
+      activeCount + '/' +
+      riskSettings.maxPositions +
+      '). Selesaikan/hapus posisi atau ubah Maksimum posisi aktif.'
+    );
+
+    if(paperNav){
+      openPaperTrades(paperNav);
+    }
+
     return;
   }
 
@@ -2608,6 +3057,49 @@ function renderPaperTradeCard(x, history=false){
     )
   : '';
 
+  const riskPlan =
+  history
+  ? null
+  : calculateRiskPlan(x);
+
+  const riskPlanHtml =
+  riskPlan?.valid
+  ? (
+      '<br><b>🛡️ Risk Plan:</b> ' +
+      riskPlan.lots + ' lot' +
+      ' • Nilai ' +
+      formatRupiah(riskPlan.positionValue) +
+      ' • Max loss ' +
+      formatRupiah(riskPlan.maxLoss) +
+      ' (' +
+      riskPlan.actualRiskPct.toFixed(2) +
+      '% modal)' +
+      '<br>RR TP1 ' +
+      (
+        riskPlan.rr1 == null
+        ? '--'
+        : '1:' + riskPlan.rr1.toFixed(2)
+      ) +
+      ' • RR TP2 ' +
+      (
+        riskPlan.rr2 == null
+        ? '--'
+        : '1:' + riskPlan.rr2.toFixed(2)
+      ) +
+      ' • Pembatas ' +
+      riskPlan.limitingFactor +
+      (
+        riskPlan.lots <= 0
+        ? '<br><span class="red">Lot 0: modal/risk belum cukup untuk 1 lot.</span>'
+        : ''
+      )
+    )
+  : (
+      history
+      ? ''
+      : '<br><span class="red">🛡️ Risk Plan belum bisa dihitung.</span>'
+    );
+
   const priceLine =
   history
   ? (
@@ -2643,7 +3135,8 @@ function renderPaperTradeCard(x, history=false){
         Setup ${x.setup || '-'}
         • Score ${Number(x.scanner_score || 0).toFixed(1)}
         ${x.batch_tag === 'TOP3' ? ' • TOP 3 #' + Number(x.scanner_rank || 0) : ''}
-        ${entryHint}<br>
+        ${entryHint}
+        ${riskPlanHtml}<br>
         ${x.monitor_note || 'Belum diperbarui.'}
         ${closedDate ? '<br>Selesai ' + closedDate : ''}
       </div>
@@ -3131,6 +3624,8 @@ function renderPaperTrades(){
 
   const historyRows =
   rows.filter(x => !activeStatuses.has(x.status));
+
+  renderRiskEngineSummary(activeRows);
 
   const wins =
   historyRows.filter(x =>

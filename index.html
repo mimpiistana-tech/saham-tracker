@@ -883,7 +883,10 @@ Scanner
 </div>
 
 <div class="nav-item"
-onclick="openAlerts(this)">
+role="button"
+tabindex="0"
+onclick="openBottomNav('alerts',this)"
+ontouchend="openBottomNav('alerts',this)">
 <span class="nav-icon">🔔</span>
 Alert
 </div>
@@ -902,22 +905,38 @@ Paper
 <script>
 
 function openBottomNav(id,btn){
+  const section =
+  document.getElementById(id);
+
+  if(!section){
+    return;
+  }
+
   document
   .querySelectorAll('.section')
   .forEach(x=>x.classList.remove('active-section'));
 
-  document
-  .getElementById(id)
-  .classList.add('active-section');
+  section.classList.add('active-section');
 
   document
   .querySelectorAll('.nav-item')
   .forEach(x=>x.classList.remove('active'));
 
-  btn.classList.add('active');
+  if(btn){
+    btn.classList.add('active');
+  }
+
+  if(id === 'alerts'){
+    renderAlerts();
+    updateNotificationStatus();
+  }
+
+  if(id === 'paper'){
+    renderPaperTrades();
+  }
 
   window.scrollTo({
-    top: document.getElementById(id).offsetTop - 20,
+    top: Math.max(0,section.offsetTop - 20),
     behavior:'smooth'
   });
 }

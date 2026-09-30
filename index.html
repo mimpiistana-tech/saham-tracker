@@ -3358,6 +3358,15 @@ function evaluateExecutionGate(item,activeRows){
   const scannerPass =
   Number(item?.scanner_score || 0) >= 55;
 
+  const regimeGateStatus =
+  String(
+    item?.regime_gate_status ||
+    'LEARNING'
+  ).toUpperCase();
+
+  const regimeGatePass =
+  regimeGateStatus === 'ACTIVE';
+
   const fullAnalysisPass =
   analysisFresh;
 
@@ -3388,6 +3397,15 @@ function evaluateExecutionGate(item,activeRows){
   portfolioGuard.level !== 'BLOCK';
 
   const checks = [
+    {
+      key:'regime',
+      label:'Regime Gate',
+      pass:regimeGatePass,
+      detail:
+        (item?.market_regime || 'Unknown') +
+        ' • ' +
+        regimeGateStatus
+    },
     {
       key:'scanner',
       label:'Scanner',
@@ -3443,13 +3461,25 @@ function evaluateExecutionGate(item,activeRows){
     }
   ];
 
+  const regimeHardBlock =
+  ['PAUSE','PAPER_ONLY']
+  .includes(regimeGateStatus);
+
   const hardBlock =
+  regimeHardBlock ||
   signalAction === 'SELL' ||
   tradeGuard.level === 'BLOCK' ||
   portfolioGuard.level === 'BLOCK';
 
   if(hardBlock){
     const reasons = [];
+
+    if(regimeHardBlock){
+      reasons.push(
+        'Regime Gate = ' +
+        regimeGateStatus
+      );
+    }
 
     if(signalAction === 'SELL'){
       reasons.push('signal Full Analysis = SELL');
@@ -3747,6 +3777,10 @@ function addPaperTradesBatch(items){
       status: 'WAIT_ENTRY',
       setup: item.setup || '',
       scanner_score: Number(item.score || 0),
+      market_regime: item.market_regime || 'Unknown',
+      regime_gate_status: item.regime_gate_status || 'LEARNING',
+      regime_gate_reason: item.regime_gate_reason || '',
+      regime_gate_sample: Number(item.regime_gate_sample || 0),
       created_at: createdAt.toISOString(),
       created_ts: Math.floor(createdAt.getTime() / 1000),
       source: plan.source || 'scanner_technical_only',
@@ -3892,6 +3926,10 @@ function addPaperTrade(item){
     status: 'WAIT_ENTRY',
     setup: item.setup || '',
     scanner_score: Number(item.score || 0),
+    market_regime: item.market_regime || 'Unknown',
+    regime_gate_status: item.regime_gate_status || 'LEARNING',
+    regime_gate_reason: item.regime_gate_reason || '',
+    regime_gate_sample: Number(item.regime_gate_sample || 0),
     created_at: createdAt.toISOString(),
     created_ts: Math.floor(createdAt.getTime() / 1000),
     source: plan.source || 'scanner_technical_only',
@@ -4371,6 +4409,8 @@ function renderPaperTradeCard(x, history=false){
         Setup ${x.setup || '-'}
         • Score ${Number(x.scanner_score || 0).toFixed(1)}
         ${x.batch_tag === 'TOP3' ? ' • TOP 3 #' + Number(x.scanner_rank || 0) : ''}
+        <br>🧠 Regime Gate: ${x.market_regime || 'Unknown'} • ${x.regime_gate_status || 'LEARNING'}
+        ${x.regime_gate_sample ? ' • sampel ' + Number(x.regime_gate_sample) : ''}
         ${entryHint}
         ${riskPlanHtml}
         ${tradeGuardHtml}
@@ -7801,13 +7841,119 @@ async function runScanner(){
     }
 
     const data = await response.json();
-    const groups = data.groups || {};
-    const topPicks = data.top_picks || [];
+
+    const marketRegimeInfo =
+    data.market_regime || {
+      regime:'Unknown',
+      date:null
+    };
+
+    const decorateCandidate = raw => {
+      const gate =
+      getCandidateRegimeGate(
+        raw,
+        marketRegimeInfo
+      );
+
+      return {
+        ...raw,
+        market_regime:
+          marketRegimeInfo.regime ||
+          'Unknown',
+        market_regime_date:
+          marketRegimeInfo.date ||
+          null,
+        regime_gate_status:
+          gate.level,
+        regime_gate_reason:
+          gate.reason,
+        regime_gate_sample:
+          Number(gate.trades || 0),
+        regime_gate_expectancy:
+          gate.expectancy,
+        regime_gate_pf:
+          gate.profit_factor
+      };
+    };
+
+    const groups = {
+      momentum:
+        (data.groups?.momentum || [])
+        .map(decorateCandidate),
+      pullback:
+        (data.groups?.pullback || [])
+        .map(decorateCandidate),
+      early:
+        (data.groups?.early || [])
+        .map(decorateCandidate),
+      neutral:
+        (data.groups?.neutral || [])
+        .map(decorateCandidate)
+    };
+
+    const candidatePool =
+    (data.results || [])
+    .map(decorateCandidate);
+
+    const gatePriority = level => ({
+      ACTIVE:0,
+      LEARNING:1,
+      PAPER_ONLY:2,
+      PAUSE:3
+    }[String(level || 'LEARNING')] ?? 9);
+
+    const eligiblePool =
+    candidatePool
+    .filter(x =>
+      x.regime_gate_status !== 'PAUSE'
+    )
+    .sort((a,b)=>{
+      const gateDiff =
+      gatePriority(a.regime_gate_status) -
+      gatePriority(b.regime_gate_status);
+
+      if(gateDiff !== 0){
+        return gateDiff;
+      }
+
+      return Number(b.score || 0) -
+      Number(a.score || 0);
+    });
+
+    const fallbackPool =
+    candidatePool
+    .slice()
+    .sort((a,b)=>
+      Number(b.score || 0) -
+      Number(a.score || 0)
+    );
+
+    const topPicks =
+    (eligiblePool.length
+      ? eligiblePool
+      : fallbackPool
+    )
+    .slice(0,3)
+    .map((x,index)=>({
+      ...x,
+      rank:index + 1,
+      priority:
+        Number(x.score || 0) >= 70
+        ? 'A'
+        : Number(x.score || 0) >= 60
+          ? 'B'
+          : 'C'
+    }));
+
+    renderRegimeGateSummary(
+      marketRegimeInfo,
+      candidatePool
+    );
 
     const topPicksHtml = topPicks.length
     ? `
       <div class="note" style="font-weight:800;margin-top:14px">
-        ⭐ TOP 3 PILIHAN RADAR
+        ⭐ TOP 3 SETELAH AUTO FILTER
         <div class="small" style="margin-top:4px">
           Kandidat utama tidak diulang lagi di daftar bawah.
         </div>
@@ -7825,11 +7971,14 @@ async function runScanner(){
           <div class="status-title">
             #${x.rank} • ${x.ticker} • Priority ${x.priority}
           </div>
-          <div class="status-value">
-            Scanner Score ${Number(x.score).toFixed(1)}
+          <div class="status-value ${regimeGateMeta(x.regime_gate_status).className}">
+            ${regimeGateMeta(x.regime_gate_status).label}
+            • Score ${Number(x.score).toFixed(1)}
           </div>
           <div class="small" style="margin-top:6px;line-height:1.6">
-            ${x.reason}<br>
+            IHSG ${x.market_regime || 'Unknown'}
+            • Sampel gate ${Number(x.regime_gate_sample || 0)}<br>
+            ${x.reason || x.regime_gate_reason || ''}<br>
             Harga ${compactNumber(x.close)}
             • Area entry awal ${compactNumber(x.entry_low)}-${compactNumber(x.entry_high)}
           </div>
@@ -7872,10 +8021,13 @@ async function runScanner(){
         <div class="status-title">
           ${x.ticker} • ${x.setup}
         </div>
-        <div class="status-value">
-          Scanner Score ${Number(x.score).toFixed(1)}
+        <div class="status-value ${regimeGateMeta(x.regime_gate_status).className}">
+          ${regimeGateMeta(x.regime_gate_status).label}
+          • Score ${Number(x.score).toFixed(1)}
         </div>
         <div class="small" style="margin-top:6px;line-height:1.6">
+          IHSG ${x.market_regime || 'Unknown'}
+          • Sampel gate ${Number(x.regime_gate_sample || 0)}<br>
           Trend ${Number(x.trend_score).toFixed(1)}
           • Volume ${Number(x.volume_score).toFixed(1)}
           • Risk ${Number(x.risk_score).toFixed(1)}<br>

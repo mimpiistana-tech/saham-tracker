@@ -671,10 +671,15 @@ def scanner():
         )
         top_picks.append(pick)
 
+    market_regime = get_current_market_regime(
+        date_to
+    )
+
     return jsonify({
         "success": True,
         "date": date_to,
         "source": "Yahoo Finance OHLCV",
+        "market_regime": market_regime,
         "universe_size": len(SCANNER_UNIVERSE),
         "scanned": len(results),
         "liquidity_filter": "avg value 20D >= Rp2B dan minimal 15 hari aktif",
@@ -2726,6 +2731,75 @@ def annotate_trades_with_regime(
         output.append(item)
 
     return output
+
+
+def get_current_market_regime(date_to):
+    """
+    Return IHSG regime for the latest trading day on/before date_to.
+    This is descriptive context for the scanner, not a forecast.
+    """
+    data, status, cache_state = (
+        get_yahoo_symbol_history(
+            "^JKSE",
+            date_to,
+            900,
+        )
+    )
+
+    if status != 200:
+        return {
+            "regime": "Unknown",
+            "date": None,
+            "symbol": "^JKSE",
+            "name": "IHSG",
+            "cache": cache_state,
+            "error": data.get(
+                "error",
+                "Gagal mengambil regime IHSG",
+            ),
+        }
+
+    rows = [
+        x for x in (data.get("data") or [])
+        if x.get("date")
+        and x.get("close") is not None
+    ]
+
+    if not rows:
+        return {
+            "regime": "Unknown",
+            "date": None,
+            "symbol": "^JKSE",
+            "name": "IHSG",
+            "cache": cache_state,
+            "error": "Data IHSG kosong",
+        }
+
+    regime_map = build_market_regime_map(
+        rows
+    )
+
+    latest_row = rows[-1]
+    latest_date = latest_row.get("date")
+    regime = regime_map.get(
+        latest_date,
+        "Unknown",
+    )
+
+    return {
+        "regime": regime,
+        "date": latest_date,
+        "symbol": "^JKSE",
+        "name": "IHSG",
+        "cache": cache_state,
+        "method": (
+            "Bullish: close > MA50 > MA200 "
+            "dan MA50 tidak menurun; "
+            "Bearish: close < MA50 < MA200 "
+            "dan MA50 tidak naik; "
+            "selain itu Sideways."
+        ),
+    }
 
 
 @app.route("/api/market-regime-validation")

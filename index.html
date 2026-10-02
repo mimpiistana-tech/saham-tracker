@@ -3858,6 +3858,99 @@ async function validateCandidateLive(item){
   };
 }
 
+
+function scannerLiveBadgeClass(status){
+  const value = String(status || '').toUpperCase();
+
+  if(['BREAKOUT_ZONE','PULLBACK_ZONE','NEAR_PULLBACK'].includes(value)){
+    return 'green';
+  }
+
+  if(['WAIT_BREAKOUT','WAIT_PULLBACK'].includes(value)){
+    return 'yellow';
+  }
+
+  if(value === 'TOO_EXTENDED'){
+    return 'red';
+  }
+
+  return 'yellow';
+}
+
+function renderScannerLiveResult(item, live){
+  const target =
+  document.getElementById('scannerLive_' + item.ticker);
+
+  if(!target) return;
+
+  if(!live?.ok){
+    target.innerHTML =
+      '<span class="yellow">⚡ Live: belum tersedia</span>';
+    return;
+  }
+
+  const status =
+  String(live.liveStatus || 'UNKNOWN').toUpperCase();
+
+  const badgeClass =
+  scannerLiveBadgeClass(status);
+
+  const gap =
+  live.gapVsEntryPct == null
+  ? '--'
+  : (
+      (Number(live.gapVsEntryPct) >= 0 ? '+' : '') +
+      Number(live.gapVsEntryPct).toFixed(2) + '%'
+    );
+
+  const timeText =
+  live.priceTime
+  ? ' • ' + live.priceTime + ' WIB'
+  : '';
+
+  target.innerHTML =
+    '<b class="' + badgeClass + '">⚡ ' + status + '</b>' +
+    '<br>Live ' + compactNumber(live.livePrice) +
+    ' • Gap vs entry ' + gap +
+    '<br>Sumber ' + (live.freshness || 'UNKNOWN') +
+    timeText +
+    '<br>' + (live.liveNote || '');
+}
+
+async function refreshScannerLivePrices(items){
+  const rows =
+  Array.isArray(items)
+  ? items.slice(0,3)
+  : [];
+
+  await Promise.all(
+    rows.map(async item=>{
+      const target =
+      document.getElementById('scannerLive_' + item.ticker);
+
+      if(target){
+        target.innerHTML =
+          '<span class="yellow">⚡ Mengecek harga terbaru...</span>';
+      }
+
+      try{
+        const live =
+        await validateCandidateLive(item);
+
+        renderScannerLiveResult(
+          item,
+          live
+        );
+      }catch(error){
+        if(target){
+          target.innerHTML =
+            '<span class="yellow">⚡ Live check gagal sementara.</span>';
+        }
+      }
+    })
+  );
+}
+
 async function addPaperTradesBatch(items){
   const candidates =
   Array.isArray(items)
@@ -8264,6 +8357,9 @@ async function runScanner(){
             • ${scannerSignalAgeText(x)}<br>
             Mode ${String(x.entry_mode || 'PULLBACK')} • Area entry ${compactNumber(x.entry_low)}-${compactNumber(x.entry_high)}
           </div>
+          <div id="scannerLive_${x.ticker}" class="small" style="margin-top:8px;line-height:1.6">
+            <span class="yellow">⚡ Menunggu live check...</span>
+          </div>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:9px">
             <button class="refresh"
               style="margin-top:0"
@@ -8344,6 +8440,10 @@ async function runScanner(){
     target.innerHTML =
     (topPicksHtml + html) ||
     '<div class="note">Belum ada kandidat yang lolos filter.</div>';
+
+    if(topPicks.length){
+      refreshScannerLivePrices(topPicks);
+    }
 
   }catch(error){
     target.innerHTML =

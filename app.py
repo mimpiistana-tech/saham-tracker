@@ -476,6 +476,7 @@ def build_scanner_item_from_rows(ticker, rows, cache_state="HIST"):
     close = float(trend_metrics.get("latest_close") or 0)
     ma20 = float(trend_metrics.get("ma20") or 0)
     atr14 = float(risk_metrics.get("atr14") or 0)
+    signal_date = str(rows[-1].get("date") or "")
 
     if (
         trend_score >= 65
@@ -516,6 +517,7 @@ def build_scanner_item_from_rows(ticker, rows, cache_state="HIST"):
         "score": round(scanner_score, 1),
         "setup": setup,
         "close": round(close, 2),
+        "signal_date": signal_date,
         "entry_low": round(entry_low, 2),
         "entry_high": round(entry_high, 2),
         "trend_score": round(trend_score, 1),
@@ -3140,6 +3142,163 @@ def market_regime_validation():
     })
 
 
+
+@app.route("/api/live-quote")
+def live_quote():
+    """
+    Harga terbaru Yahoo Finance untuk validasi sebelum entry.
+    Endpoint ini tidak memakai kuota IndexAlpha.
+    """
+    ticker = request.args.get("ticker", "").upper().strip()
+
+    if not ticker:
+        return jsonify({
+            "success": False,
+            "error": "ticker wajib diisi",
+        }), 400
+
+    symbol = f"{ticker}.JK"
+    now_ts = int(time.time())
+    period1 = max(0, now_ts - (7 * 24 * 3600))
+
+    try:
+        response = requests.get(
+            f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}",
+            params={
+                "period1": period1,
+                "period2": now_ts + 60,
+                "interval": "5m",
+                "events": "history",
+                "includeAdjustedClose": "true",
+            },
+            headers={
+                "User-Agent": "Mozilla/5.0 StockRadar/1.0",
+                "accept": "application/json",
+            },
+            timeout=20,
+        )
+
+        if response.status_code != 200:
+            return jsonify({
+                "success": False,
+                "error": f"Yahoo live quote HTTP {response.status_code}",
+            }), response.status_code
+
+        payload = response.json()
+        chart = payload.get("chart") or {}
+        results = chart.get("result") or []
+
+        if not results:
+            return jsonify({
+                "success": False,
+                "error": "Yahoo belum mengembalikan live quote",
+            }), 404
+
+        result = results[0]
+        meta = result.get("meta") or {}
+        timestamps = result.get("timestamp") or []
+        quote_list = (
+            (result.get("indicators") or {}).get("quote") or [{}]
+        )
+        quote = quote_list[0] if quote_list else {}
+        closes = quote.get("close") or []
+
+        last_candle_price = 0.0
+        last_candle_ts = 0
+
+        for i in range(len(timestamps) - 1, -1, -1):
+            close = closes[i] if i < len(closes) else None
+
+            if close is None:
+                continue
+
+            last_candle_price = float(close)
+            last_candle_ts = int(timestamps[i])
+            break
+
+        market_price = float(meta.get("regularMarketPrice") or 0)
+        market_time = int(meta.get("regularMarketTime") or 0)
+
+        price = last_candle_price
+        price_ts = last_candle_ts
+
+        # regularMarketPrice sering lebih baru daripada close candle 5m terakhir.
+        if (
+            market_price > 0
+            and (
+                price <= 0
+                or market_time >= price_ts
+            )
+        ):
+            price = market_price
+            price_ts = market_time or price_ts
+
+        if price <= 0:
+            return jsonify({
+                "success": False,
+                "error": "Harga terbaru Yahoo tidak tersedia",
+            }), 404
+
+        if price_ts <= 0:
+            price_ts = now_ts
+
+        age_seconds = max(0, now_ts - price_ts)
+        jakarta_dt = (
+            datetime.utcfromtimestamp(price_ts)
+            + timedelta(hours=7)
+        )
+
+        if age_seconds <= 20 * 60:
+            freshness = "LIVE"
+        elif age_seconds <= 6 * 3600:
+            freshness = "DELAYED"
+        else:
+            freshness = "LAST_SESSION"
+
+        return jsonify({
+            "success": True,
+            "ticker": ticker,
+            "symbol": symbol,
+            "source": "Yahoo Finance intraday",
+            "interval": "5m",
+            "price": round(price, 2),
+            "price_ts": price_ts,
+            "price_time_wib": jakarta_dt.strftime("%Y-%m-%d %H:%M:%S"),
+            "price_date": jakarta_dt.date().isoformat(),
+            "age_seconds": age_seconds,
+            "freshness": freshness,
+            "is_intraday_fresh": age_seconds <= 20 * 60,
+            "last_candle_price": (
+                round(last_candle_price, 2)
+                if last_candle_price > 0
+                else None
+            ),
+            "last_candle_ts": (
+                last_candle_ts
+                if last_candle_ts > 0
+                else None
+            ),
+            "regular_market_price": (
+                round(market_price, 2)
+                if market_price > 0
+                else None
+            ),
+            "regular_market_time": (
+                market_time
+                if market_time > 0
+                else None
+            ),
+            "exchange_timezone": meta.get("exchangeTimezoneName"),
+            "checked_at": now_ts,
+        })
+
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "error": f"Live quote error: {e}",
+        }), 500
+
+
 @app.route("/api/paper-check")
 def paper_check():
     ticker = request.args.get("ticker", "").upper().strip()
@@ -3255,14 +3414,24 @@ def paper_check():
                 "close": close_value,
             })
 
-        market_price = meta.get("regularMarketPrice")
+        market_price = float(meta.get("regularMarketPrice") or 0)
+        market_time = int(meta.get("regularMarketTime") or 0)
 
         if candles:
             last_price = candles[-1]["close"]
+            last_price_ts = candles[-1]["ts"]
             high_since = max(x["high"] for x in candles)
             low_since = min(x["low"] for x in candles)
+
+            if (
+                market_price > 0
+                and market_time >= last_price_ts
+            ):
+                last_price = market_price
+                last_price_ts = market_time
         else:
-            last_price = float(market_price or 0)
+            last_price = market_price
+            last_price_ts = market_time or now_ts
             high_since = last_price
             low_since = last_price
 
@@ -3381,6 +3550,7 @@ def paper_check():
             "entry_triggered": entered,
             "tp1_hit": tp1_hit,
             "last_price": round(last_price, 2),
+            "price_time": last_price_ts,
             "pnl_pct": round(pnl_pct, 2) if pnl_pct is not None else None,
             "high_since": round(high_since, 2),
             "low_since": round(low_since, 2),

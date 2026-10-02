@@ -497,18 +497,47 @@ def build_scanner_item_from_rows(ticker, rows, cache_state="HIST"):
     else:
         setup = "Netral"
 
-    entry_low = max(0.0, ma20 - (0.50 * atr14))
-    entry_high = max(0.0, ma20 + (0.35 * atr14))
-    entry_mid = (
-        (entry_low + entry_high) / 2
-        if entry_high > 0
-        else close
+    prior_rows = (
+        rows[-21:-1]
+        if len(rows) >= 21
+        else rows[:-1]
     )
 
-    paper_cut_loss = max(
-        0.0,
-        entry_low - (0.75 * atr14),
+    prior_resistance = max(
+        (
+            float(x.get("high") or x.get("close") or 0)
+            for x in prior_rows
+        ),
+        default=close,
     )
+
+    if setup == "Momentum":
+        entry_mode = "BREAKOUT"
+        breakout_trigger = max(
+            0.0,
+            prior_resistance + (0.15 * atr14),
+        )
+        entry_low = breakout_trigger
+        entry_high = breakout_trigger + (0.35 * atr14)
+        entry_mid = breakout_trigger
+        paper_cut_loss = max(
+            0.0,
+            breakout_trigger - (1.25 * atr14),
+        )
+    else:
+        entry_mode = "PULLBACK"
+        entry_low = max(0.0, ma20 - (0.50 * atr14))
+        entry_high = max(0.0, ma20 + (0.35 * atr14))
+        entry_mid = (
+            (entry_low + entry_high) / 2
+            if entry_high > 0
+            else close
+        )
+        paper_cut_loss = max(
+            0.0,
+            entry_low - (0.75 * atr14),
+        )
+
     paper_tp1 = entry_mid + (1.50 * atr14)
     paper_tp2 = entry_mid + (3.00 * atr14)
 
@@ -518,6 +547,8 @@ def build_scanner_item_from_rows(ticker, rows, cache_state="HIST"):
         "setup": setup,
         "close": round(close, 2),
         "signal_date": signal_date,
+        "entry_mode": entry_mode,
+        "prior_resistance": round(prior_resistance, 2),
         "entry_low": round(entry_low, 2),
         "entry_high": round(entry_high, 2),
         "trend_score": round(trend_score, 1),
@@ -530,6 +561,7 @@ def build_scanner_item_from_rows(ticker, rows, cache_state="HIST"):
         "active_days_20": active_days,
         "paper_plan": {
             "entry": round(entry_mid, 2),
+            "entry_mode": entry_mode,
             "cut_loss": round(paper_cut_loss, 2),
             "tp1": round(paper_tp1, 2),
             "tp2": round(paper_tp2, 2),
@@ -3302,6 +3334,14 @@ def live_quote():
 @app.route("/api/paper-check")
 def paper_check():
     ticker = request.args.get("ticker", "").upper().strip()
+    entry_mode = (
+        request.args.get("entry_mode", "PULLBACK")
+        .upper()
+        .strip()
+    )
+
+    if entry_mode not in {"PULLBACK", "BREAKOUT"}:
+        entry_mode = "PULLBACK"
 
     try:
         since = int(float(request.args.get("since", "0")))
@@ -3449,7 +3489,12 @@ def paper_check():
             ts = candle["ts"]
 
             if not entered:
-                if low <= entry:
+                if entry_mode == "BREAKOUT":
+                    entry_touched = high >= entry
+                else:
+                    entry_touched = low <= entry
+
+                if entry_touched:
                     entered = True
                     entry_time = ts
                     state = "OPEN"
@@ -3479,7 +3524,11 @@ def paper_check():
                 state = "TP1_HIT"
 
         if not candles and last_price > 0:
-            if last_price <= entry:
+            if (
+                (entry_mode == "BREAKOUT" and last_price >= entry)
+                or
+                (entry_mode == "PULLBACK" and last_price <= entry)
+            ):
                 entered = True
                 state = "OPEN"
 
@@ -3546,6 +3595,7 @@ def paper_check():
             "ticker": ticker,
             "source": "Yahoo Finance intraday",
             "interval": interval,
+            "entry_mode": entry_mode,
             "state": state,
             "entry_triggered": entered,
             "tp1_hit": tp1_hit,

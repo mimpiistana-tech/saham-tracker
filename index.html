@@ -3793,26 +3793,53 @@ async function validateCandidateLive(item){
   ? ((livePrice / signalClose) - 1) * 100
   : null;
 
-  // Maksudnya bukan mengejar harga yang sudah lari jauh dari rencana scanner.
-  // >3% di atas entry: tunggu pullback.
-  // <=3% di atas entry: masih boleh dipantau sebagai near-entry.
-  // Di bawah/sama entry: paper monitor akan menunggu trigger aktual dari candle.
-  let liveStatus = 'WAIT_PULLBACK';
-  let liveNote =
-    'Harga sudah ' + gapVsEntryPct.toFixed(2) +
-    '% di atas entry scanner. Jangan kejar; tunggu pullback.';
+  const entryMode =
+  String(
+    plan.entry_mode ||
+    item?.entry_mode ||
+    'PULLBACK'
+  ).toUpperCase();
 
-  if(gapVsEntryPct <= 0){
-    liveStatus = 'NEAR_ENTRY';
-    liveNote =
-      'Harga live sudah di/di bawah level entry scanner. ' +
-      'Paper monitor akan menunggu sentuhan candle aktual.';
-  }else if(gapVsEntryPct <= 3){
-    liveStatus = 'NEAR_ENTRY';
-    liveNote =
-      'Harga live masih dekat entry scanner (' +
-      gapVsEntryPct.toFixed(2) +
-      '% di atas entry).';
+  let liveStatus = 'WAIT_PULLBACK';
+  let liveNote = '';
+
+  if(entryMode === 'BREAKOUT'){
+    if(gapVsEntryPct < -1){
+      liveStatus = 'WAIT_BREAKOUT';
+      liveNote =
+        'Harga masih ' +
+        Math.abs(gapVsEntryPct).toFixed(2) +
+        '% di bawah trigger breakout. Tunggu tembus trigger.';
+    }else if(gapVsEntryPct <= 3){
+      liveStatus = 'BREAKOUT_ZONE';
+      liveNote =
+        'Harga berada di sekitar trigger breakout (' +
+        gapVsEntryPct.toFixed(2) +
+        '% vs trigger).';
+    }else{
+      liveStatus = 'TOO_EXTENDED';
+      liveNote =
+        'Harga sudah ' + gapVsEntryPct.toFixed(2) +
+        '% di atas trigger breakout. Jangan kejar; tunggu retest/pullback.';
+    }
+  }else{
+    if(gapVsEntryPct <= 0){
+      liveStatus = 'PULLBACK_ZONE';
+      liveNote =
+        'Harga live sudah di/di bawah level pullback scanner. ' +
+        'Paper monitor menunggu sentuhan aktual.';
+    }else if(gapVsEntryPct <= 3){
+      liveStatus = 'NEAR_PULLBACK';
+      liveNote =
+        'Harga live masih dekat area pullback (' +
+        gapVsEntryPct.toFixed(2) +
+        '% di atas entry).';
+    }else{
+      liveStatus = 'WAIT_PULLBACK';
+      liveNote =
+        'Harga sudah ' + gapVsEntryPct.toFixed(2) +
+        '% di atas entry pullback. Jangan kejar; tunggu pullback.';
+    }
   }
 
   return {
@@ -3820,6 +3847,7 @@ async function validateCandidateLive(item){
     livePrice,
     gapVsEntryPct,
     gapVsSignalPct,
+    entryMode,
     liveStatus,
     liveNote,
     source:data.source || 'Yahoo Finance intraday',
@@ -3938,6 +3966,7 @@ async function addPaperTradesBatch(items){
       created_at: createdAt.toISOString(),
       created_ts: Math.floor(createdAt.getTime() / 1000),
       source: plan.source || 'scanner_technical_only',
+      entry_mode: String(plan.entry_mode || item.entry_mode || live?.entryMode || 'PULLBACK').toUpperCase(),
       signal_date: item.signal_date || null,
       signal_close: Number(item.close || 0),
       live_price_at_add: Number(live?.livePrice || item.close || 0),
@@ -4247,7 +4276,8 @@ async function updatePaperTrade(item){
   '&entry=' + encodeURIComponent(item.entry) +
   '&tp1=' + encodeURIComponent(item.tp1) +
   '&tp2=' + encodeURIComponent(item.tp2) +
-  '&cl=' + encodeURIComponent(item.cut_loss);
+  '&cl=' + encodeURIComponent(item.cut_loss) +
+  '&entry_mode=' + encodeURIComponent(item.entry_mode || 'PULLBACK');
 
   const response =
   await fetch(url,{cache:'no-store'});
@@ -4345,6 +4375,7 @@ async function updatePaperTrade(item){
     high_since: Number(data.high_since || 0),
     low_since: Number(data.low_since || 0),
     last_checked_at: data.checked_at || null,
+    last_price_time: data.price_time || item.last_price_time || null,
     auto_source: data.source || '',
     exit_price:
       data.exit_price == null
@@ -4613,7 +4644,8 @@ function renderPaperTradeCard(x, history=false){
         TP1 ${compactNumber(x.tp1)}
         • TP2 ${compactNumber(x.tp2)}
         • CL ${compactNumber(x.cut_loss)}<br>
-        Setup ${x.setup || '-'}
+        Entry Mode ${String(x.entry_mode || 'PULLBACK')}
+        • Setup ${x.setup || '-'}
         • Score ${Number(x.scanner_score || 0).toFixed(1)}
         ${x.batch_tag === 'TOP3' ? ' • TOP 3 #' + Number(x.scanner_rank || 0) : ''}
         <br>🧠 Regime Gate: ${x.market_regime || 'Unknown'} • ${x.regime_gate_status || 'LEARNING'}
@@ -8230,7 +8262,7 @@ async function runScanner(){
             ${x.reason || x.regime_gate_reason || ''}<br>
             Harga signal ${compactNumber(x.close)}
             • ${scannerSignalAgeText(x)}<br>
-            Area entry awal ${compactNumber(x.entry_low)}-${compactNumber(x.entry_high)}
+            Mode ${String(x.entry_mode || 'PULLBACK')} • Area entry ${compactNumber(x.entry_low)}-${compactNumber(x.entry_high)}
           </div>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:9px">
             <button class="refresh"
@@ -8283,7 +8315,7 @@ async function runScanner(){
           • Risk ${Number(x.risk_score).toFixed(1)}<br>
           Harga signal ${compactNumber(x.close)}
           • ${scannerSignalAgeText(x)}<br>
-          Area entry awal ${compactNumber(x.entry_low)}-${compactNumber(x.entry_high)}
+          Mode ${String(x.entry_mode || 'PULLBACK')} • Area entry ${compactNumber(x.entry_low)}-${compactNumber(x.entry_high)}
         </div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:9px">
           <button class="refresh"

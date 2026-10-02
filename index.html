@@ -2863,7 +2863,13 @@ function saveFullAnalysis(ticker,date,raw,savedAt=Date.now()){
     savedAt:Number(savedAt || Date.now()),
     radarScore:Number(radar.radar_score || 0),
     coverage:Number(radar.coverage || 0),
-    brokerScore:Number(broker.score || 0),
+    brokerScore:
+      broker.score == null
+      ? null
+      : Number(broker.score),
+    brokerAvailable:
+      broker.available !== false &&
+      broker.score != null,
     brokerLabel:broker.label || '',
     brokerImbalance:Number(metrics.imbalance || 0),
     activeBrokers:Number(metrics.active_brokers || 0),
@@ -3373,7 +3379,9 @@ function evaluateExecutionGate(item,activeRows){
   const brokerPass =
   Boolean(
     analysisFresh &&
-    Number(analysis?.brokerScore || 0) >= 58
+    analysis?.brokerAvailable !== false &&
+    analysis?.brokerScore != null &&
+    Number(analysis.brokerScore) >= 58
   );
 
   const signalAction =
@@ -3432,7 +3440,12 @@ function evaluateExecutionGate(item,activeRows){
       pass:brokerPass,
       detail:
         analysisFresh
-        ? 'Score ' + Number(analysis?.brokerScore || 0).toFixed(1)
+        ? (
+            analysis?.brokerAvailable === false ||
+            analysis?.brokerScore == null
+          )
+          ? 'Menunggu data broker'
+          : 'Score ' + Number(analysis.brokerScore).toFixed(1)
         : 'Menunggu Analisa Full'
     },
     {
@@ -6087,7 +6100,13 @@ function renderRadar(raw){
   Number(radar.coverage ?? 0);
 
   const brokerScore =
-  Number(broker.score ?? 0);
+  broker.score == null
+  ? null
+  : Number(broker.score);
+
+  const brokerAvailable =
+  broker.available !== false &&
+  brokerScore != null;
 
   const trendScore =
   trend.score == null ? null : Number(trend.score);
@@ -6124,7 +6143,9 @@ function renderRadar(raw){
   document
   .getElementById('brokerScore')
   .textContent =
-  brokerScore.toFixed(1);
+  brokerAvailable
+  ? brokerScore.toFixed(1)
+  : '--';
 
 
   document
@@ -6186,35 +6207,39 @@ function renderRadar(raw){
 
 
   const brokerPressure =
-Number(metrics.imbalance || 0);
+  brokerAvailable
+  ? Number(metrics.imbalance || 0)
+  : null;
 
-const netEl =
-document.getElementById('netFlow');
+  const netEl =
+  document.getElementById('netFlow');
 
-netEl.textContent =
-(brokerPressure > 0 ? '+' : '') +
-(brokerPressure * 100).toFixed(1) +
-'%';
+  netEl.textContent =
+  brokerPressure == null
+  ? '--'
+  : (brokerPressure > 0 ? '+' : '') +
+    (brokerPressure * 100).toFixed(1) +
+    '%';
 
-let pressureColor = 'yellow';
+  let pressureColor = 'yellow';
 
-if(brokerPressure > 0.05){
-  pressureColor = 'green';
-}
-else if(brokerPressure < -0.05){
-  pressureColor = 'red';
-}
+  if(brokerPressure != null && brokerPressure > 0.05){
+    pressureColor = 'green';
+  }
+  else if(brokerPressure != null && brokerPressure < -0.05){
+    pressureColor = 'red';
+  }
 
-netEl.className =
-'tile-value ' + pressureColor;
-
- 
+  netEl.className =
+  'tile-value ' + pressureColor;
 
 
   document
   .getElementById('activeBrokers')
   .textContent =
-  metrics.active_brokers ?? '--';
+  brokerAvailable
+  ? (metrics.active_brokers ?? '--')
+  : '--';
 
 
   document
@@ -6228,19 +6253,25 @@ netEl.className =
   document
   .getElementById('imbalance')
   .textContent =
-  percent(metrics.imbalance);
+  brokerAvailable
+  ? percent(metrics.imbalance)
+  : '--';
 
 
   document
   .getElementById('breadth')
   .textContent =
-  percent(metrics.breadth);
+  brokerAvailable
+  ? percent(metrics.breadth)
+  : '--';
 
 
   document
   .getElementById('topBuyerShare')
   .textContent =
-  percent(metrics.top_buyer_share);
+  brokerAvailable
+  ? percent(metrics.top_buyer_share)
+  : '--';
 
   document
   .getElementById('trendDetail')

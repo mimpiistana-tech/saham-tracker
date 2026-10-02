@@ -151,7 +151,8 @@ async function checkOne(item){
     '&entry=' + encodeURIComponent(item.entry) +
     '&tp1=' + encodeURIComponent(item.tp1) +
     '&tp2=' + encodeURIComponent(item.tp2) +
-    '&cl=' + encodeURIComponent(item.cut_loss);
+    '&cl=' + encodeURIComponent(item.cut_loss) +
+    '&entry_mode=' + encodeURIComponent(item.entry_mode || 'PULLBACK');
 
   const response = await fetch(url,{cache:'no-store'});
 

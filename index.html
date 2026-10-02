@@ -2710,7 +2710,7 @@ function getRadarCache(ticker,date){
   try{
     const raw =
     localStorage.getItem(
-      'stockradar_data_' +
+      'stockradar_data_v2_' +
       String(ticker || '').toUpperCase() +
       '_' +
       String(date || '')
@@ -8447,7 +8447,7 @@ encodeURIComponent(date),
     clearQuotaShield();
     
   localStorage.setItem(
-  'stockradar_data_' + ticker + '_' + date,
+  'stockradar_data_v2_' + ticker + '_' + date,
   JSON.stringify({
     savedAt: Date.now(),
     data: data
@@ -8553,7 +8553,7 @@ document
 .value;
 const saved =
 localStorage.getItem(
-  'stockradar_data_' + ticker + '_' + date
+  'stockradar_data_v2_' + ticker + '_' + date
 );
     
 

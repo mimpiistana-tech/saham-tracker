@@ -3405,6 +3405,15 @@ def paper_check():
         }), 500
 
 
+def previous_weekday(date_value):
+    candidate = date_value - timedelta(days=1)
+
+    while candidate.weekday() >= 5:
+        candidate -= timedelta(days=1)
+
+    return candidate
+
+
 @app.route("/api/radar")
 def radar():
     ticker = request.args.get("ticker", "").upper()
@@ -3442,12 +3451,83 @@ def radar():
     broker_rows = extract_broker_rows(broker_data)
 
     warnings = []
+    broker_date = date_to
+    broker_is_fallback = False
 
     if not broker_rows:
-        warnings.append(
-            "Broker summary kosong/belum tersedia; Radar lanjut dengan Trend + Volume + Risk. "
-            "Trade Signal ditahan sampai data broker tersedia."
-        )
+        try:
+            requested_date = datetime.strptime(
+                date_to,
+                "%Y-%m-%d",
+            ).date()
+
+            jakarta_today = (
+                datetime.utcnow()
+                + timedelta(hours=7)
+            ).date()
+        except ValueError:
+            requested_date = None
+            jakarta_today = None
+
+        # IndexAlpha broker summary hari berjalan belum tentu tersedia saat market buka.
+        # Untuk analisa hari ini, coba sekali memakai hari bursa sebelumnya agar hemat kuota.
+        if (
+            requested_date is not None
+            and jakarta_today is not None
+            and requested_date >= jakarta_today
+        ):
+            fallback_date = previous_weekday(
+                requested_date
+            )
+            fallback_text = fallback_date.isoformat()
+            fallback_cache_key = (
+                f"broker_{ticker}_{fallback_text}_{fallback_text}"
+            )
+
+            fallback_data, fallback_status, fallback_cache = indexalpha_get(
+                "/stocks/broker-summary",
+                {
+                    "ticker": ticker,
+                    "from": fallback_text,
+                    "to": fallback_text,
+                    "investor": "all",
+                    "market": "RG",
+                },
+                fallback_cache_key,
+            )
+
+            if fallback_status == 200:
+                fallback_rows = extract_broker_rows(
+                    fallback_data
+                )
+
+                if fallback_rows:
+                    broker_data = fallback_data
+                    broker_rows = fallback_rows
+                    broker_cache = fallback_cache
+                    broker_date = fallback_text
+                    broker_is_fallback = True
+
+                    warnings.append(
+                        "Broker hari ini belum tersedia; memakai broker D-1 "
+                        f"({fallback_text}) sebagai konteks. "
+                        "Sinyal eksekusi tetap ditahan sampai broker hari ini tersedia."
+                    )
+                else:
+                    warnings.append(
+                        "Broker hari ini dan D-1 belum tersedia; Radar lanjut "
+                        "dengan Trend + Volume + Risk."
+                    )
+            else:
+                warnings.append(
+                    "Broker hari ini belum tersedia dan fallback D-1 gagal; "
+                    "Radar lanjut dengan Trend + Volume + Risk."
+                )
+        else:
+            warnings.append(
+                "Broker summary kosong/belum tersedia; Radar lanjut dengan "
+                "Trend + Volume + Risk."
+            )
 
     ohlcv_data, ohlcv_status, ohlcv_cache = get_ohlcv(
         ticker,
@@ -3472,10 +3552,31 @@ def radar():
             broker_rows,
         )
 
+    result["broker_meta"] = {
+        "requested_date": date_to,
+        "date": broker_date,
+        "is_fallback": broker_is_fallback,
+        "source": "IndexAlpha",
+    }
+
+    if broker_is_fallback:
+        signal = result.get("signal")
+
+        if isinstance(signal, dict):
+            signal["action"] = "WAIT"
+            signal["label"] = "Broker D-1"
+            signal["reason"] = (
+                f"Broker memakai data D-1 ({broker_date}) sebagai konteks, "
+                "bukan data intraday hari ini. Tunggu broker hari ini untuk "
+                "konfirmasi eksekusi."
+            )
+
     return jsonify({
         "success": True,
         "ticker": ticker,
         "date": date_to,
+        "broker_date": broker_date,
+        "broker_is_fallback": broker_is_fallback,
         "cache": {
             "broker": broker_cache,
             "ohlcv": ohlcv_cache,

@@ -2870,6 +2870,10 @@ function saveFullAnalysis(ticker,date,raw,savedAt=Date.now()){
     brokerAvailable:
       broker.available !== false &&
       broker.score != null,
+    brokerDate:
+      data?.broker_meta?.date || '',
+    brokerFallback:
+      Boolean(data?.broker_meta?.is_fallback),
     brokerLabel:broker.label || '',
     brokerImbalance:Number(metrics.imbalance || 0),
     activeBrokers:Number(metrics.active_brokers || 0),
@@ -3445,7 +3449,15 @@ function evaluateExecutionGate(item,activeRows){
             analysis?.brokerScore == null
           )
           ? 'Menunggu data broker'
-          : 'Score ' + Number(analysis.brokerScore).toFixed(1)
+          : (
+              'Score ' +
+              Number(analysis.brokerScore).toFixed(1) +
+              (
+                analysis?.brokerFallback
+                ? ' • D-1 ' + String(analysis?.brokerDate || '')
+                : ''
+              )
+            )
         : 'Menunggu Analisa Full'
     },
     {
@@ -6083,6 +6095,9 @@ function renderRadar(raw){
   const metrics =
   broker.metrics || {};
 
+  const brokerMeta =
+  data.broker_meta || {};
+
   const trendMetrics =
   trend.metrics || {};
 
@@ -6148,11 +6163,24 @@ function renderRadar(raw){
   : '--';
 
 
+  const brokerDateText =
+  brokerMeta.date
+  ? String(brokerMeta.date).split('-').reverse().join('/')
+  : '';
+
   document
   .getElementById('brokerLabel')
   .textContent =
-  broker.label ||
-  'Belum ada data';
+  brokerAvailable
+  ? (
+      (broker.label || 'Data broker aktif') +
+      (
+        brokerMeta.is_fallback
+        ? ' • D-1 ' + brokerDateText
+        : ''
+      )
+    )
+  : 'Menunggu data broker';
 
 
   document

@@ -120,7 +120,17 @@ def indexalpha_get(path, params, cache_key):
             }
 
         if response.status_code == 200:
-            cache_put(cache_key, data, response.status_code)
+            is_empty_broker = (
+                path == "/stocks/broker-summary"
+                and isinstance(data, dict)
+                and data.get("success") is True
+                and data.get("data") == []
+            )
+
+            # Broker kosong sebelum update harian tidak boleh menempel 24 jam di cache.
+            if not is_empty_broker:
+                cache_put(cache_key, data, response.status_code)
+
             return data, response.status_code, "MISS"
 
         if stale_cached is not None:
@@ -3426,14 +3436,54 @@ def radar():
             "error": "ticker, from, dan to wajib diisi",
         }), 400
 
-    broker_cache_key = f"broker_{ticker}_{date_from}_{date_to}"
+    warnings = []
+    broker_is_fallback = False
+    broker_mode = "requested_day"
+    broker_from = date_from
+    broker_date = date_to
+
+    try:
+        requested_date = datetime.strptime(
+            date_to,
+            "%Y-%m-%d",
+        ).date()
+
+        jakarta_now = datetime.utcnow() + timedelta(hours=7)
+        jakarta_today = jakarta_now.date()
+    except ValueError:
+        return jsonify({
+            "success": False,
+            "error": "Format tanggal harus YYYY-MM-DD",
+        }), 400
+
+    # IndexAlpha memperbarui broker summary sekitar 19:00 WIB.
+    # Sebelum jam update, hemat kuota: langsung pakai agregat sampai D-1.
+    if (
+        requested_date >= jakarta_today
+        and jakarta_now.hour < 19
+    ):
+        broker_end_date = previous_weekday(requested_date)
+        broker_start_date = broker_end_date - timedelta(days=6)
+
+        broker_from = broker_start_date.isoformat()
+        broker_date = broker_end_date.isoformat()
+        broker_is_fallback = True
+        broker_mode = "prior_window"
+
+        warnings.append(
+            "Broker intraday belum dipublikasikan; memakai agregat broker "
+            f"{broker_from} s/d {broker_date} sebagai konteks sampai D-1. "
+            "Trade Signal tetap WAIT sampai broker hari ini tersedia."
+        )
+
+    broker_cache_key = f"broker_{ticker}_{broker_from}_{broker_date}"
 
     broker_data, broker_status, broker_cache = indexalpha_get(
         "/stocks/broker-summary",
         {
             "ticker": ticker,
-            "from": date_from,
-            "to": date_to,
+            "from": broker_from,
+            "to": broker_date,
             "investor": "all",
             "market": "RG",
         },
@@ -3450,84 +3500,11 @@ def radar():
 
     broker_rows = extract_broker_rows(broker_data)
 
-    warnings = []
-    broker_date = date_to
-    broker_is_fallback = False
-
     if not broker_rows:
-        try:
-            requested_date = datetime.strptime(
-                date_to,
-                "%Y-%m-%d",
-            ).date()
-
-            jakarta_today = (
-                datetime.utcnow()
-                + timedelta(hours=7)
-            ).date()
-        except ValueError:
-            requested_date = None
-            jakarta_today = None
-
-        # IndexAlpha broker summary hari berjalan belum tentu tersedia saat market buka.
-        # Untuk analisa hari ini, coba sekali memakai hari bursa sebelumnya agar hemat kuota.
-        if (
-            requested_date is not None
-            and jakarta_today is not None
-            and requested_date >= jakarta_today
-        ):
-            fallback_date = previous_weekday(
-                requested_date
-            )
-            fallback_text = fallback_date.isoformat()
-            fallback_cache_key = (
-                f"broker_{ticker}_{fallback_text}_{fallback_text}"
-            )
-
-            fallback_data, fallback_status, fallback_cache = indexalpha_get(
-                "/stocks/broker-summary",
-                {
-                    "ticker": ticker,
-                    "from": fallback_text,
-                    "to": fallback_text,
-                    "investor": "all",
-                    "market": "RG",
-                },
-                fallback_cache_key,
-            )
-
-            if fallback_status == 200:
-                fallback_rows = extract_broker_rows(
-                    fallback_data
-                )
-
-                if fallback_rows:
-                    broker_data = fallback_data
-                    broker_rows = fallback_rows
-                    broker_cache = fallback_cache
-                    broker_date = fallback_text
-                    broker_is_fallback = True
-
-                    warnings.append(
-                        "Broker hari ini belum tersedia; memakai broker D-1 "
-                        f"({fallback_text}) sebagai konteks. "
-                        "Sinyal eksekusi tetap ditahan sampai broker hari ini tersedia."
-                    )
-                else:
-                    warnings.append(
-                        "Broker hari ini dan D-1 belum tersedia; Radar lanjut "
-                        "dengan Trend + Volume + Risk."
-                    )
-            else:
-                warnings.append(
-                    "Broker hari ini belum tersedia dan fallback D-1 gagal; "
-                    "Radar lanjut dengan Trend + Volume + Risk."
-                )
-        else:
-            warnings.append(
-                "Broker summary kosong/belum tersedia; Radar lanjut dengan "
-                "Trend + Volume + Risk."
-            )
+        warnings.append(
+            "Broker summary masih kosong pada window referensi; Radar lanjut "
+            "dengan Trend + Volume + Risk dan tidak membuat Broker Score palsu."
+        )
 
     ohlcv_data, ohlcv_status, ohlcv_cache = get_ohlcv(
         ticker,
@@ -3554,8 +3531,10 @@ def radar():
 
     result["broker_meta"] = {
         "requested_date": date_to,
+        "from": broker_from,
         "date": broker_date,
         "is_fallback": broker_is_fallback,
+        "mode": broker_mode,
         "source": "IndexAlpha",
     }
 
@@ -3564,19 +3543,21 @@ def radar():
 
         if isinstance(signal, dict):
             signal["action"] = "WAIT"
-            signal["label"] = "Broker D-1"
+            signal["label"] = "Broker s/d D-1"
             signal["reason"] = (
-                f"Broker memakai data D-1 ({broker_date}) sebagai konteks, "
-                "bukan data intraday hari ini. Tunggu broker hari ini untuk "
-                "konfirmasi eksekusi."
+                f"Broker memakai agregat {broker_from} s/d {broker_date} "
+                "sebagai konteks historis, bukan data intraday hari ini. "
+                "Tunggu broker hari ini untuk konfirmasi eksekusi."
             )
 
     return jsonify({
         "success": True,
         "ticker": ticker,
         "date": date_to,
+        "broker_from": broker_from,
         "broker_date": broker_date,
         "broker_is_fallback": broker_is_fallback,
+        "broker_mode": broker_mode,
         "cache": {
             "broker": broker_cache,
             "ohlcv": ohlcv_cache,

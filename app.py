@@ -3441,19 +3441,18 @@ def radar():
 
     broker_rows = extract_broker_rows(broker_data)
 
+    warnings = []
+
     if not broker_rows:
-        return jsonify({
-            "success": False,
-            "error": "Format broker belum dikenali",
-            "raw_preview": str(broker_data)[:1500],
-        }), 422
+        warnings.append(
+            "Broker summary kosong/belum tersedia; Radar lanjut dengan Trend + Volume + Risk. "
+            "Trade Signal ditahan sampai data broker tersedia."
+        )
 
     ohlcv_data, ohlcv_status, ohlcv_cache = get_ohlcv(
         ticker,
         date_to,
     )
-
-    warnings = []
 
     if ohlcv_status == 200:
         ohlcv_rows = extract_ohlcv_rows(ohlcv_data)

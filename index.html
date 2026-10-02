@@ -3718,7 +3718,119 @@ function renderRiskEngineSummary(activeRows){
   );
 }
 
-function addPaperTradesBatch(items){
+
+function scannerSignalAgeText(item){
+  const signalDate = String(item?.signal_date || '').trim();
+
+  if(!signalDate){
+    return 'Tanggal candle signal belum tersedia';
+  }
+
+  const parsed = new Date(signalDate + 'T00:00:00');
+
+  if(Number.isNaN(parsed.getTime())){
+    return 'Signal ' + signalDate;
+  }
+
+  const now = new Date();
+  const todayLocal = new Date(
+    now.getFullYear(),
+    now.getMonth(),
+    now.getDate()
+  );
+
+  const signalLocal = new Date(
+    parsed.getFullYear(),
+    parsed.getMonth(),
+    parsed.getDate()
+  );
+
+  const days = Math.round(
+    (todayLocal - signalLocal) / 86400000
+  );
+
+  return (
+    'Signal candle ' + signalDate +
+    (days > 0 ? ' • ' + days + ' hari lalu' : ' • hari ini')
+  );
+}
+
+async function validateCandidateLive(item){
+  const plan = item?.paper_plan || {};
+  const entry = Number(plan.entry || 0);
+  const signalClose = Number(item?.close || 0);
+
+  if(!item?.ticker || entry <= 0){
+    return {
+      ok:false,
+      error:'Ticker / entry plan belum valid.'
+    };
+  }
+
+  const url =
+  'https://saham-tracker-api.onrender.com/api/live-quote?ticker=' +
+  encodeURIComponent(item.ticker);
+
+  const response =
+  await fetch(url,{cache:'no-store'});
+
+  if(!response.ok){
+    throw new Error('Live quote HTTP ' + response.status);
+  }
+
+  const data = await response.json();
+  const livePrice = Number(data.price || 0);
+
+  if(livePrice <= 0){
+    throw new Error('Harga live belum tersedia.');
+  }
+
+  const gapVsEntryPct =
+  ((livePrice / entry) - 1) * 100;
+
+  const gapVsSignalPct =
+  signalClose > 0
+  ? ((livePrice / signalClose) - 1) * 100
+  : null;
+
+  // Maksudnya bukan mengejar harga yang sudah lari jauh dari rencana scanner.
+  // >3% di atas entry: tunggu pullback.
+  // <=3% di atas entry: masih boleh dipantau sebagai near-entry.
+  // Di bawah/sama entry: paper monitor akan menunggu trigger aktual dari candle.
+  let liveStatus = 'WAIT_PULLBACK';
+  let liveNote =
+    'Harga sudah ' + gapVsEntryPct.toFixed(2) +
+    '% di atas entry scanner. Jangan kejar; tunggu pullback.';
+
+  if(gapVsEntryPct <= 0){
+    liveStatus = 'NEAR_ENTRY';
+    liveNote =
+      'Harga live sudah di/di bawah level entry scanner. ' +
+      'Paper monitor akan menunggu sentuhan candle aktual.';
+  }else if(gapVsEntryPct <= 3){
+    liveStatus = 'NEAR_ENTRY';
+    liveNote =
+      'Harga live masih dekat entry scanner (' +
+      gapVsEntryPct.toFixed(2) +
+      '% di atas entry).';
+  }
+
+  return {
+    ok:true,
+    livePrice,
+    gapVsEntryPct,
+    gapVsSignalPct,
+    liveStatus,
+    liveNote,
+    source:data.source || 'Yahoo Finance intraday',
+    freshness:data.freshness || 'UNKNOWN',
+    priceTime:data.price_time_wib || '',
+    priceTs:Number(data.price_ts || 0),
+    checkedAt:Number(data.checked_at || 0)
+  };
+}
+
+async function addPaperTradesBatch(items){
   const candidates =
   Array.isArray(items)
   ? items.slice(0,3)
@@ -3764,23 +3876,25 @@ function addPaperTradesBatch(items){
   let guardBlocked = 0;
   let portfolioBlocked = 0;
 
-  candidates.forEach((item,index)=>{
-    const plan =
-    item.paper_plan || {};
+  let liveValidationFailed = 0;
+
+  for(let index=0; index<candidates.length; index++){
+    const item = candidates[index];
+    const plan = item.paper_plan || {};
 
     if(!plan.entry){
       unavailable += 1;
-      return;
+      continue;
     }
 
     if(activeTickers.has(item.ticker)){
       skipped += 1;
-      return;
+      continue;
     }
 
     if(availableSlots <= 0){
       slotLimited += 1;
-      return;
+      continue;
     }
 
     const guard =
@@ -3793,7 +3907,15 @@ function addPaperTradesBatch(items){
 
     if(guard.level === 'BLOCK'){
       guardBlocked += 1;
-      return;
+      continue;
+    }
+
+    let live = null;
+
+    try{
+      live = await validateCandidateLive(item);
+    }catch(error){
+      liveValidationFailed += 1;
     }
 
     const createdAt =
@@ -3816,11 +3938,30 @@ function addPaperTradesBatch(items){
       created_at: createdAt.toISOString(),
       created_ts: Math.floor(createdAt.getTime() / 1000),
       source: plan.source || 'scanner_technical_only',
-      last_price: Number(item.close || 0),
+      signal_date: item.signal_date || null,
+      signal_close: Number(item.close || 0),
+      live_price_at_add: Number(live?.livePrice || item.close || 0),
+      live_gap_entry_pct:
+        live?.gapVsEntryPct == null
+        ? null
+        : Number(live.gapVsEntryPct),
+      live_gap_signal_pct:
+        live?.gapVsSignalPct == null
+        ? null
+        : Number(live.gapVsSignalPct),
+      live_validation_status:
+        live?.liveStatus || 'UNVERIFIED',
+      live_freshness:
+        live?.freshness || 'UNKNOWN',
+      live_price_time:
+        live?.priceTime || '',
+      last_price: Number(live?.livePrice || item.close || 0),
       pnl_pct: null,
       batch_tag: 'TOP3',
       scanner_rank: Number(item.rank || index + 1),
-      monitor_note: 'Menunggu harga masuk ke area entry.'
+      monitor_note:
+        live?.liveNote ||
+        'Live validation gagal sementara; Paper monitor tetap akan cek harga terbaru.'
     };
 
     const portfolioGuard =
@@ -3831,7 +3972,7 @@ function addPaperTradesBatch(items){
 
     if(portfolioGuard.level === 'BLOCK'){
       portfolioBlocked += 1;
-      return;
+      continue;
     }
 
     rows.unshift(proposedTrade);
@@ -3840,7 +3981,7 @@ function addPaperTradesBatch(items){
     activeTickers.add(item.ticker);
     availableSlots -= 1;
     added += 1;
-  });
+  }
 
   savePaperTrades(rows);
 
@@ -3854,7 +3995,8 @@ function addPaperTradesBatch(items){
     ' • slot penuh ' + slotLimited +
     ' • guard blokir ' + guardBlocked +
     ' • portfolio blokir ' + portfolioBlocked +
-    ' • plan belum tersedia ' + unavailable;
+    ' • plan belum tersedia ' + unavailable +
+    ' • live check gagal ' + liveValidationFailed;
   }
 
   const paperNav =
@@ -3871,7 +4013,7 @@ function addPaperTradesBatch(items){
   }
 }
 
-function addPaperTrade(item){
+async function addPaperTrade(item){
   const plan = item.paper_plan || {};
 
   if(!plan.entry){
@@ -3946,6 +4088,20 @@ function addPaperTrade(item){
     return;
   }
 
+  let live = null;
+
+  try{
+    live = await validateCandidateLive(item);
+  }catch(error){
+    const proceed = confirm(
+      'Live validation gagal sementara. Tambahkan ke Paper Trade sebagai UNVERIFIED?'
+    );
+
+    if(!proceed){
+      return;
+    }
+  }
+
   const createdAt = new Date();
 
   const proposedTrade = {
@@ -3965,9 +4121,28 @@ function addPaperTrade(item){
     created_at: createdAt.toISOString(),
     created_ts: Math.floor(createdAt.getTime() / 1000),
     source: plan.source || 'scanner_technical_only',
-    last_price: Number(item.close || 0),
+    signal_date: item.signal_date || null,
+    signal_close: Number(item.close || 0),
+    live_price_at_add: Number(live?.livePrice || item.close || 0),
+    live_gap_entry_pct:
+      live?.gapVsEntryPct == null
+      ? null
+      : Number(live.gapVsEntryPct),
+    live_gap_signal_pct:
+      live?.gapVsSignalPct == null
+      ? null
+      : Number(live.gapVsSignalPct),
+    live_validation_status:
+      live?.liveStatus || 'UNVERIFIED',
+    live_freshness:
+      live?.freshness || 'UNKNOWN',
+    live_price_time:
+      live?.priceTime || '',
+    last_price: Number(live?.livePrice || item.close || 0),
     pnl_pct: null,
-    monitor_note: 'Menunggu harga masuk ke area entry.'
+    monitor_note:
+      live?.liveNote ||
+      'Live validation belum tersedia; Paper monitor akan cek ulang.'
   };
 
   const activeRows =
@@ -4443,6 +4618,8 @@ function renderPaperTradeCard(x, history=false){
         ${x.batch_tag === 'TOP3' ? ' • TOP 3 #' + Number(x.scanner_rank || 0) : ''}
         <br>🧠 Regime Gate: ${x.market_regime || 'Unknown'} • ${x.regime_gate_status || 'LEARNING'}
         ${x.regime_gate_sample ? ' • sampel ' + Number(x.regime_gate_sample) : ''}
+        ${x.signal_date ? '<br>📅 Signal ' + x.signal_date + ' • close ' + compactNumber(x.signal_close) : ''}
+        ${x.live_validation_status ? '<br>⚡ Live check ' + x.live_validation_status + ' • ' + (x.live_freshness || 'UNKNOWN') + (x.live_gap_entry_pct == null ? '' : ' • gap vs entry ' + (Number(x.live_gap_entry_pct) >= 0 ? '+' : '') + Number(x.live_gap_entry_pct).toFixed(2) + '%') : ''}
         ${entryHint}
         ${riskPlanHtml}
         ${tradeGuardHtml}
@@ -8051,8 +8228,9 @@ async function runScanner(){
             IHSG ${x.market_regime || 'Unknown'}
             • Sampel gate ${Number(x.regime_gate_sample || 0)}<br>
             ${x.reason || x.regime_gate_reason || ''}<br>
-            Harga ${compactNumber(x.close)}
-            • Area entry awal ${compactNumber(x.entry_low)}-${compactNumber(x.entry_high)}
+            Harga signal ${compactNumber(x.close)}
+            • ${scannerSignalAgeText(x)}<br>
+            Area entry awal ${compactNumber(x.entry_low)}-${compactNumber(x.entry_high)}
           </div>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:9px">
             <button class="refresh"
@@ -8103,8 +8281,9 @@ async function runScanner(){
           Trend ${Number(x.trend_score).toFixed(1)}
           • Volume ${Number(x.volume_score).toFixed(1)}
           • Risk ${Number(x.risk_score).toFixed(1)}<br>
-          Harga ${compactNumber(x.close)}
-          • Area entry awal ${compactNumber(x.entry_low)}-${compactNumber(x.entry_high)}
+          Harga signal ${compactNumber(x.close)}
+          • ${scannerSignalAgeText(x)}<br>
+          Area entry awal ${compactNumber(x.entry_low)}-${compactNumber(x.entry_high)}
         </div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:9px">
           <button class="refresh"

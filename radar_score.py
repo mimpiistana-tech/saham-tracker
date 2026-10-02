@@ -805,12 +805,31 @@ def build_radar_score(components):
     }
 
 
+def _mark_broker_unavailable(broker):
+    broker = dict(broker)
+    broker["available"] = False
+    broker["score"] = None
+    broker["label"] = "Menunggu data broker"
+    broker["notes"] = [
+        "Broker summary kosong/belum tersedia; komponen broker tidak dihitung ke Radar Score."
+    ]
+    return broker
+
+
 def score_from_broker_rows(rows):
     broker = score_broker_flow(rows)
+    broker_available = bool(
+        broker.get("metrics", {}).get("active_brokers")
+    )
 
-    radar = build_radar_score({
-        "broker": broker["score"]
-    })
+    if broker_available:
+        broker["available"] = True
+        radar = build_radar_score({
+            "broker": broker["score"]
+        })
+    else:
+        broker = _mark_broker_unavailable(broker)
+        radar = build_radar_score({})
 
     return {
         "radar": radar,
@@ -820,13 +839,23 @@ def score_from_broker_rows(rows):
 
 def score_from_market_data(broker_rows, ohlcv_rows):
     broker = score_broker_flow(broker_rows)
+    broker_available = bool(
+        broker.get("metrics", {}).get("active_brokers")
+    )
+
+    if broker_available:
+        broker["available"] = True
+    else:
+        broker = _mark_broker_unavailable(broker)
+
     trend = score_trend_ohlcv(ohlcv_rows)
     volume = score_volume_ohlcv(ohlcv_rows)
     risk = score_risk_ohlcv(ohlcv_rows)
 
-    components = {
-        "broker": broker["score"],
-    }
+    components = {}
+
+    if broker_available:
+        components["broker"] = broker["score"]
 
     if trend.get("available"):
         components["trend"] = trend["score"]
@@ -839,13 +868,36 @@ def score_from_market_data(broker_rows, ohlcv_rows):
 
     radar = build_radar_score(components)
 
+    signal_broker = broker
+
+    if not broker_available:
+        signal_broker = {
+            "score": 50,
+            "metrics": {
+                "active_brokers": 0,
+            },
+        }
+
     signal = build_trade_signal(
-        broker,
+        signal_broker,
         trend,
         volume,
         risk,
         ohlcv_rows,
     )
+
+    if not broker_available:
+        signal["action"] = "WAIT"
+        signal["label"] = "Tunggu Broker"
+        signal["confidence"] = (
+            round(radar["radar_score"], 1)
+            if radar.get("coverage", 0) > 0
+            else 0
+        )
+        signal["reason"] = (
+            "Data broker belum tersedia; level teknikal tetap dihitung, "
+            "tetapi entry ditahan sampai broker summary tersedia."
+        )
 
     return {
         "radar": radar,

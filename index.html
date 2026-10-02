@@ -3877,6 +3877,81 @@ function scannerLiveBadgeClass(status){
   return 'yellow';
 }
 
+
+function scannerPaperAction(live){
+  const freshness =
+  String(live?.freshness || 'UNKNOWN').toUpperCase();
+
+  const status =
+  String(live?.liveStatus || 'UNKNOWN').toUpperCase();
+
+  const isSessionData =
+  ['LIVE','DELAYED'].includes(freshness);
+
+  if(!isSessionData){
+    return {
+      className:'yellow',
+      label:'⏸ PLAN ONLY',
+      note:'Data masih ' + freshness +
+        '. Belum jadikan ini trigger entry; Scan lagi saat sesi berjalan.'
+    };
+  }
+
+  if(status === 'WAIT_BREAKOUT'){
+    return {
+      className:'yellow',
+      label:'⏳ TUNGGU BREAKOUT',
+      note:'Belum entry. Monitor sampai harga benar-benar menembus trigger breakout.'
+    };
+  }
+
+  if(status === 'BREAKOUT_ZONE'){
+    return {
+      className:'green',
+      label:'🧪 SIAP PAPER BREAKOUT',
+      note:'Harga sudah di area trigger. Paper monitor boleh diaktifkan; jangan mengejar jauh di atas trigger.'
+    };
+  }
+
+  if(status === 'TOO_EXTENDED'){
+    return {
+      className:'red',
+      label:'🚫 JANGAN KEJAR',
+      note:'Harga terlalu jauh dari trigger. Tunggu retest atau setup baru.'
+    };
+  }
+
+  if(status === 'PULLBACK_ZONE'){
+    return {
+      className:'green',
+      label:'🧪 SIAP PAPER BID',
+      note:'Harga sudah masuk area pullback. Paper bid dapat diuji pada level entry.'
+    };
+  }
+
+  if(status === 'NEAR_PULLBACK'){
+    return {
+      className:'green',
+      label:'🧪 PASANG BID PAPER',
+      note:'Harga masih dekat area pullback. Pasang bid paper di level entry dan tunggu tersentuh.'
+    };
+  }
+
+  if(status === 'WAIT_PULLBACK'){
+    return {
+      className:'yellow',
+      label:'⏳ TUNGGU PULLBACK',
+      note:'Harga masih terlalu tinggi dari area entry. Jangan kejar.'
+    };
+  }
+
+  return {
+    className:'yellow',
+    label:'⏳ TUNGGU',
+    note:'Belum ada trigger entry yang valid.'
+  };
+}
+
 function renderScannerLiveResult(item, live){
   const target =
   document.getElementById('scannerLive_' + item.ticker);
@@ -3908,13 +3983,26 @@ function renderScannerLiveResult(item, live){
   ? ' • ' + live.priceTime + ' WIB'
   : '';
 
+  const action =
+  scannerPaperAction(live);
+
+  const priceLabel =
+  ['LIVE','DELAYED'].includes(
+    String(live.freshness || '').toUpperCase()
+  )
+  ? 'Harga sesi'
+  : 'Harga sesi terakhir';
+
   target.innerHTML =
     '<b class="' + badgeClass + '">⚡ ' + status + '</b>' +
-    '<br>Live ' + compactNumber(live.livePrice) +
+    '<br>' + priceLabel + ' ' + compactNumber(live.livePrice) +
     ' • Gap vs entry ' + gap +
     '<br>Sumber ' + (live.freshness || 'UNKNOWN') +
     timeText +
-    '<br>' + (live.liveNote || '');
+    '<br>' + (live.liveNote || '') +
+    '<br><b class="' + action.className + '">🎯 ' +
+    action.label + '</b>' +
+    '<br>' + action.note;
 }
 
 async function refreshScannerLivePrices(items){

@@ -3348,6 +3348,13 @@ def paper_check():
     if entry_mode not in {"PULLBACK", "BREAKOUT"}:
         entry_mode = "PULLBACK"
 
+    already_entered = (
+        request.args.get("already_entered", "0")
+        .strip()
+        .lower()
+        in {"1", "true", "yes", "y"}
+    )
+
     try:
         since = int(float(request.args.get("since", "0")))
         entry = float(request.args.get("entry", "0"))
@@ -3480,10 +3487,10 @@ def paper_check():
             high_since = last_price
             low_since = last_price
 
-        state = "WAIT_ENTRY"
-        entered = False
+        state = "OPEN" if already_entered else "WAIT_ENTRY"
+        entered = already_entered
         tp1_hit = False
-        entry_time = None
+        entry_time = since if already_entered else None
         tp1_time = None
         exit_time = None
         exit_price = None
@@ -3601,6 +3608,7 @@ def paper_check():
             "source": "Yahoo Finance intraday",
             "interval": interval,
             "entry_mode": entry_mode,
+            "already_entered": already_entered,
             "state": state,
             "entry_triggered": entered,
             "tp1_hit": tp1_hit,

@@ -4290,6 +4290,12 @@ function confirmScannerStockbit(item){
       tp2,
       referencePrice:Number(item.close || 0),
       radarScore:Number(item.score || 0),
+      scannerScore:Number(item.score || 0),
+      setup:item.setup || ('Genius ' + mode),
+      marketRegime:item.market_regime || 'Unknown',
+      regimeGateStatus:item.regime_gate_status || 'LEARNING',
+      regimeGateReason:item.regime_gate_reason || '',
+      regimeGateSample:Number(item.regime_gate_sample || 0),
       signalDate:item.signal_date || null
     };
 
@@ -6867,13 +6873,19 @@ function recordStockbitPaperTrigger(ctx,price,decisionLabel){
     tp2,
     cut_loss:cutLoss,
     status:'OPEN',
-    setup:'Genius ' + String(ctx.entryMode || 'PULLBACK'),
-    scanner_score:0,
+    setup:
+      ctx.setup ||
+      ('Genius ' + String(ctx.entryMode || 'PULLBACK')),
+    scanner_score:Number(
+      ctx.scannerScore ??
+      ctx.radarScore ??
+      0
+    ),
     radar_score:Number(ctx.radarScore || 0),
-    market_regime:'Unknown',
-    regime_gate_status:'LEARNING',
-    regime_gate_reason:'',
-    regime_gate_sample:0,
+    market_regime:ctx.marketRegime || 'Unknown',
+    regime_gate_status:ctx.regimeGateStatus || 'LEARNING',
+    regime_gate_reason:ctx.regimeGateReason || '',
+    regime_gate_sample:Number(ctx.regimeGateSample || 0),
     created_at:now.toISOString(),
     created_ts:createdTs,
     entry_time:now.toISOString(),
@@ -7654,6 +7666,12 @@ function renderRadar(raw){
     tp2:Number(levels.tp2_reference || 0),
     referencePrice:Number(levels.close || 0),
     radarScore:Number(radarScore || 0),
+    scannerScore:0,
+    setup:'Genius ' + entryMode,
+    marketRegime:'Unknown',
+    regimeGateStatus:'LEARNING',
+    regimeGateReason:'',
+    regimeGateSample:0,
     signalDate:
       raw?.date ||
       data?.date ||

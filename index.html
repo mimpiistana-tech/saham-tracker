@@ -6766,12 +6766,25 @@ function renderRadar(raw){
   hasSignal ? (signal.reason || 'Belum ada alasan sinyal.') : 'Tekan Refresh Radar untuk menghitung sinyal terbaru.';
 
   const levels = signal.levels || {};
+  const entryMode = String(
+    signal.entry_mode || levels.entry_mode || 'PULLBACK'
+  ).toUpperCase();
+
+  const entryLow =
+    Number(levels.entry_low || levels.buy_pullback_low || 0);
+
+  const entryHigh =
+    Number(levels.entry_high || levels.buy_pullback_high || 0);
 
   document
   .getElementById('buyPrice')
   .textContent =
-  hasSignal
-  ? compactNumber(levels.buy_pullback_low) + '-' + compactNumber(levels.buy_pullback_high)
+  hasSignal && entryLow > 0
+  ? (
+      entryMode === 'BREAKOUT'
+      ? '>' + compactNumber(entryLow)
+      : compactNumber(entryLow) + '-' + compactNumber(entryHigh)
+    )
   : '--';
 
   document
@@ -6792,18 +6805,30 @@ function renderRadar(raw){
   .getElementById('tradePlanNote')
   .textContent =
   hasSignal
-  ? 'Breakout entry di atas ' + compactNumber(levels.buy_breakout_above) +
-    ' • Harga acuan ' + compactNumber(levels.close)
+  ? (
+      entryMode === 'BREAKOUT'
+      ? 'Mode BREAKOUT • trigger di atas ' + compactNumber(entryLow) +
+        ' • Harga acuan ' + compactNumber(levels.close)
+      : 'Mode PULLBACK • area beli ' +
+        compactNumber(entryLow) + '-' + compactNumber(entryHigh) +
+        ' • Harga acuan ' + compactNumber(levels.close)
+    )
   : 'Tekan Refresh Radar untuk menghitung level harga.';
 
   document
   .getElementById('signalLevels')
   .innerHTML =
   hasSignal
-  ? 'Beli pullback: <b>' + compactNumber(levels.buy_pullback_low) + ' - ' + compactNumber(levels.buy_pullback_high) + '</b><br>' +
-    'Beli breakout: <b>di atas ' + compactNumber(levels.buy_breakout_above) + '</b><br>' +
-    'Cut loss / invalidasi: <b>' + compactNumber(levels.invalidation) + '</b><br>' +
-    'Jual / take profit: <b>' + compactNumber(levels.tp1_reference) + ' / ' + compactNumber(levels.tp2_reference) + '</b>'
+  ? (
+      'Mode entry: <b>' + entryMode + '</b><br>' +
+      (
+        entryMode === 'BREAKOUT'
+        ? 'Beli breakout: <b>di atas ' + compactNumber(entryLow) + '</b><br>'
+        : 'Beli pullback: <b>' + compactNumber(entryLow) + ' - ' + compactNumber(entryHigh) + '</b><br>'
+      ) +
+      'Cut loss / invalidasi: <b>' + compactNumber(levels.invalidation) + '</b><br>' +
+      'Jual / take profit: <b>' + compactNumber(levels.tp1_reference) + ' / ' + compactNumber(levels.tp2_reference) + '</b>'
+    )
   : 'Belum ada level trade.';
 
   const notes = [];

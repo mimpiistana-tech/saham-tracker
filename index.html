@@ -3904,6 +3904,8 @@ async function validateCandidateLive(item){
     liveNote,
     source:data.source || 'Yahoo Finance intraday',
     freshness:data.freshness || 'UNKNOWN',
+    executionAllowed:
+      String(data.freshness || 'UNKNOWN').toUpperCase() === 'FRESH',
     priceTime:data.price_time_wib || '',
     priceTs:Number(data.price_ts || 0),
     checkedAt:Number(data.checked_at || 0)
@@ -3937,15 +3939,15 @@ function scannerPaperAction(live){
   const status =
   String(live?.liveStatus || 'UNKNOWN').toUpperCase();
 
-  const isSessionData =
-  ['LIVE','DELAYED'].includes(freshness);
+  const isFreshForExecution =
+  freshness === 'FRESH';
 
-  if(!isSessionData){
+  if(!isFreshForExecution){
     return {
       className:'yellow',
-      label:'⏸ PLAN ONLY',
-      note:'Data masih ' + freshness +
-        '. Belum jadikan ini trigger entry; Scan lagi saat sesi berjalan.'
+      label:'⏳ WAIT DATA FRESH',
+      note:'Execution Gate aktif: harga ' + freshness +
+        '. BUY/paper entry diblokir sampai harga intraday berstatus FRESH.'
     };
   }
 
@@ -4138,6 +4140,7 @@ async function addPaperTradesBatch(items){
   let portfolioBlocked = 0;
 
   let liveValidationFailed = 0;
+  let liveFreshnessBlocked = 0;
 
   for(let index=0; index<candidates.length; index++){
     const item = candidates[index];
@@ -4177,6 +4180,12 @@ async function addPaperTradesBatch(items){
       live = await validateCandidateLive(item);
     }catch(error){
       liveValidationFailed += 1;
+      continue;
+    }
+
+    if(!live?.executionAllowed){
+      liveFreshnessBlocked += 1;
+      continue;
     }
 
     const createdAt =
@@ -4258,6 +4267,7 @@ async function addPaperTradesBatch(items){
     ' • guard blokir ' + guardBlocked +
     ' • portfolio blokir ' + portfolioBlocked +
     ' • plan belum tersedia ' + unavailable +
+    ' • data tidak fresh ' + liveFreshnessBlocked +
     ' • live check gagal ' + liveValidationFailed;
   }
 
@@ -4355,13 +4365,19 @@ async function addPaperTrade(item){
   try{
     live = await validateCandidateLive(item);
   }catch(error){
-    const proceed = confirm(
-      'Live validation gagal sementara. Tambahkan ke Paper Trade sebagai UNVERIFIED?'
+    alert(
+      'WAIT DATA FRESH: live validation gagal. Paper entry diblokir sampai harga intraday tersedia dan FRESH.'
     );
+    return;
+  }
 
-    if(!proceed){
-      return;
-    }
+  if(!live?.executionAllowed){
+    alert(
+      'WAIT DATA FRESH: harga masih ' +
+      String(live?.freshness || 'UNKNOWN').toUpperCase() +
+      '. Paper entry diblokir sampai status FRESH.'
+    );
+    return;
   }
 
   const createdAt = new Date();
@@ -6635,6 +6651,32 @@ async function refreshGeniusLiveQuote(ticker, referencePrice){
           gapEl.className = 'live-price-value yellow';
         }
       }
+
+      if(freshness !== 'FRESH'){
+        const signalEl = document.getElementById('signalAction');
+        const signalLabelEl = document.getElementById('signalLabel');
+        const signalDetailEl = document.getElementById('signalDetail');
+        const signalReasonEl = document.getElementById('signalReason');
+
+        if(signalEl){
+          signalEl.textContent = 'WAIT';
+          signalEl.className = 'tile-value yellow';
+        }
+
+        if(signalLabelEl){
+          signalLabelEl.textContent = 'WAIT DATA FRESH';
+        }
+
+        if(signalDetailEl){
+          signalDetailEl.textContent =
+            'WAIT • WAIT DATA FRESH • harga ' + freshness;
+        }
+
+        if(signalReasonEl){
+          signalReasonEl.textContent =
+            'Execution Gate aktif. BUY/paper entry diblokir sampai harga intraday berstatus FRESH.';
+        }
+      }
     }
 
   }catch(error){
@@ -6644,7 +6686,31 @@ async function refreshGeniusLiveQuote(ticker, referencePrice){
 
     if(metaEl){
       metaEl.textContent =
-        '⚠️ Harga live gagal dimuat sementara. Harga acuan tetap berasal dari analisa Radar.';
+        '⚠️ Harga live gagal dimuat. Execution Gate: WAIT DATA FRESH.';
+    }
+
+    const signalEl = document.getElementById('signalAction');
+    const signalLabelEl = document.getElementById('signalLabel');
+    const signalDetailEl = document.getElementById('signalDetail');
+    const signalReasonEl = document.getElementById('signalReason');
+
+    if(signalEl){
+      signalEl.textContent = 'WAIT';
+      signalEl.className = 'tile-value yellow';
+    }
+
+    if(signalLabelEl){
+      signalLabelEl.textContent = 'WAIT DATA FRESH';
+    }
+
+    if(signalDetailEl){
+      signalDetailEl.textContent =
+        'WAIT • WAIT DATA FRESH • live quote unavailable';
+    }
+
+    if(signalReasonEl){
+      signalReasonEl.textContent =
+        'Execution Gate aktif. Harga live belum tervalidasi, jadi BUY/paper entry diblokir.';
     }
   }
 }

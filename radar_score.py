@@ -723,17 +723,49 @@ def build_trade_signal(broker, trend, volume, risk, rows):
         ma20 + (0.35 * atr14)
         if ma20 > 0 else close
     )
+    pullback_high = max(pullback_high, pullback_low)
 
     breakout_trigger = resistance20 + (0.15 * atr14)
 
-    tp1 = close + (1.5 * atr14)
-    tp2 = close + (3.0 * atr14)
+    # Satu mode entry harus memakai satu basis risk/reward yang konsisten.
+    # Sebelumnya TP dihitung dari close terakhir sehingga pada saham yang
+    # berada di bawah MA20, TP1 bisa lebih rendah daripada area beli.
+    entry_mode = (
+        "BREAKOUT"
+        if action == "BUY" and label == "Buy on Breakout"
+        else "PULLBACK"
+    )
+
+    if entry_mode == "BREAKOUT":
+        entry_low = breakout_trigger
+        entry_high = breakout_trigger + (0.35 * atr14)
+        entry_reference = breakout_trigger
+        trade_invalidation = min(
+            invalidation,
+            max(0.0, breakout_trigger - (1.25 * atr14)),
+        )
+    else:
+        entry_low = pullback_low
+        entry_high = pullback_high
+        entry_reference = (entry_low + entry_high) / 2
+        trade_invalidation = invalidation
+
+    # TP selalu berada di atas seluruh area entry.
+    tp1 = max(
+        entry_high + (0.50 * atr14),
+        entry_reference + (1.50 * atr14),
+    )
+    tp2 = max(
+        tp1 + (0.75 * atr14),
+        entry_reference + (3.00 * atr14),
+    )
 
     return {
         "action": action,
         "label": label,
         "confidence": round(clamp(composite), 1),
         "reason": reason,
+        "entry_mode": entry_mode,
         "levels": {
             "close": round(close, 2),
             "support20": round(support20, 2),
@@ -741,7 +773,11 @@ def build_trade_signal(broker, trend, volume, risk, rows):
             "buy_pullback_low": round(pullback_low, 2),
             "buy_pullback_high": round(pullback_high, 2),
             "buy_breakout_above": round(breakout_trigger, 2),
-            "invalidation": round(invalidation, 2),
+            "entry_mode": entry_mode,
+            "entry_low": round(entry_low, 2),
+            "entry_high": round(entry_high, 2),
+            "entry_reference": round(entry_reference, 2),
+            "invalidation": round(trade_invalidation, 2),
             "tp1_reference": round(tp1, 2),
             "tp2_reference": round(tp2, 2),
         },

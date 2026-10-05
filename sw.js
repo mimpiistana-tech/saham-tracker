@@ -152,7 +152,18 @@ async function checkOne(item){
     '&tp1=' + encodeURIComponent(item.tp1) +
     '&tp2=' + encodeURIComponent(item.tp2) +
     '&cl=' + encodeURIComponent(item.cut_loss) +
-    '&entry_mode=' + encodeURIComponent(item.entry_mode || 'PULLBACK');
+    '&entry_mode=' + encodeURIComponent(item.entry_mode || 'PULLBACK') +
+    '&already_entered=' + encodeURIComponent(
+      item.manual_stockbit_trigger || item.entry_triggered ? '1' : '0'
+    ) +
+    '&already_tp1_hit=' + encodeURIComponent(
+      item.tp1_manual || item.tp1_hit ? '1' : '0'
+    ) +
+    '&manual_tp1_ts=' + encodeURIComponent(
+      item.tp1_time
+      ? Math.floor(new Date(item.tp1_time).getTime()/1000)
+      : ''
+    );
 
   const response = await fetch(url,{cache:'no-store'});
 
@@ -162,14 +173,36 @@ async function checkOne(item){
 
   const data = await response.json();
 
+  const monitoredStatus =
+    data.state || item.status;
+
+  const nextStatus =
+    (
+      item.tp1_manual &&
+      monitoredStatus === 'OPEN'
+    )
+    ? 'TP1_HIT'
+    : monitoredStatus;
+
   const current = {
     ...item,
     created_ts:createdTs,
-    status:data.state || item.status,
+    status:nextStatus,
     last_price:Number(data.last_price || 0),
     pnl_pct:data.pnl_pct == null ? null : Number(data.pnl_pct),
     monitor_note:data.note || '',
-    tp1_hit:Boolean(data.tp1_hit),
+    tp1_hit:Boolean(
+      data.tp1_hit ||
+      item.tp1_hit ||
+      item.tp1_manual
+    ),
+    tp1_time:
+      data.tp1_time ||
+      item.tp1_time ||
+      null,
+    tp1_time_wib:
+      item.tp1_time_wib ||
+      null,
     entry_triggered:Boolean(data.entry_triggered),
     high_since:Number(data.high_since || 0),
     low_since:Number(data.low_since || 0),

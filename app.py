@@ -3355,6 +3355,30 @@ def paper_check():
         in {"1", "true", "yes", "y"}
     )
 
+    already_tp1_hit = (
+        request.args.get("already_tp1_hit", "0")
+        .strip()
+        .lower()
+        in {"1", "true", "yes", "y"}
+    )
+
+    manual_tp1_ts_raw = (
+        request.args.get("manual_tp1_ts", "")
+        .strip()
+    )
+
+    try:
+        manual_tp1_ts = (
+            int(float(manual_tp1_ts_raw))
+            if manual_tp1_ts_raw
+            else None
+        )
+    except ValueError:
+        manual_tp1_ts = None
+
+    if already_tp1_hit:
+        already_entered = True
+
     try:
         since = int(float(request.args.get("since", "0")))
         entry = float(request.args.get("entry", "0"))
@@ -3487,11 +3511,23 @@ def paper_check():
             high_since = last_price
             low_since = last_price
 
-        state = "OPEN" if already_entered else "WAIT_ENTRY"
+        if already_tp1_hit:
+            state = "TP1_HIT"
+        elif already_entered:
+            state = "OPEN"
+        else:
+            state = "WAIT_ENTRY"
+
         entered = already_entered
-        tp1_hit = False
-        entry_time = since if already_entered else None
-        tp1_time = None
+        tp1_hit = already_tp1_hit
+        entry_time = since if entered else None
+        tp1_time = (
+            manual_tp1_ts
+            if already_tp1_hit and manual_tp1_ts
+            else since
+            if already_tp1_hit
+            else None
+        )
         exit_time = None
         exit_price = None
 
@@ -3609,6 +3645,7 @@ def paper_check():
             "interval": interval,
             "entry_mode": entry_mode,
             "already_entered": already_entered,
+            "already_tp1_hit": already_tp1_hit,
             "state": state,
             "entry_triggered": entered,
             "tp1_hit": tp1_hit,

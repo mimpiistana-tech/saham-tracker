@@ -4178,6 +4178,151 @@ async function refreshScannerLivePrices(items){
   );
 }
 
+function confirmScannerStockbit(item){
+  const input =
+    document.getElementById('scannerStockbitInput_' + item.ticker);
+  const resultEl =
+    document.getElementById('scannerStockbitResult_' + item.ticker);
+
+  const price =
+    parseStockbitPrice(input?.value);
+
+  if(!price || price <= 0){
+    if(resultEl){
+      resultEl.className = 'small red';
+      resultEl.textContent =
+        'Harga Stockbit belum valid. Contoh: 595.';
+    }
+    return;
+  }
+
+  const mode =
+    String(item.entry_mode || 'PULLBACK').toUpperCase();
+
+  const entryLow =
+    Number(item.entry_low || item.paper_plan?.entry || 0);
+  const entryHigh =
+    Number(item.entry_high || item.paper_plan?.entry || 0);
+  const plan =
+    item.paper_plan || {};
+  const cutLoss =
+    Number(plan.cut_loss || 0);
+  const tp1 =
+    Number(plan.tp1 || 0);
+  const tp2 =
+    Number(plan.tp2 || 0);
+
+  let level = 'YELLOW';
+  let label = '⏳ TUNGGU';
+  let note = '';
+
+  if(cutLoss > 0 && price <= cutLoss){
+    level = 'RED';
+    label = '🚫 INVALID / JANGAN ENTRY';
+    note =
+      'Harga Stockbit sudah menyentuh/di bawah CL ' +
+      compactNumber(cutLoss) + '.';
+  }else if(mode === 'BREAKOUT'){
+    if(price < entryLow){
+      label = '⏳ TUNGGU BREAKOUT';
+      note =
+        'Harga masih di bawah trigger ' +
+        compactNumber(entryLow) + '.';
+    }else{
+      const gapPct =
+        ((price / entryLow) - 1) * 100;
+
+      if(gapPct <= 3){
+        level = 'GREEN';
+        label = '🧪 SIAP PAPER BREAKOUT';
+        note =
+          'Harga Stockbit sudah melewati trigger dan masih dekat.';
+      }else{
+        level = 'RED';
+        label = '🚫 JANGAN KEJAR';
+        note =
+          'Harga sudah ' + gapPct.toFixed(2) +
+          '% di atas trigger.';
+      }
+    }
+  }else{
+    if(price >= entryLow && price <= entryHigh){
+      level = 'GREEN';
+      label = '🧪 PASANG BID PAPER';
+      note =
+        'Harga Stockbit berada di area pullback ' +
+        compactNumber(entryLow) + '-' +
+        compactNumber(entryHigh) + '.';
+    }else if(price > entryHigh){
+      const gapPct =
+        ((price / entryHigh) - 1) * 100;
+
+      if(gapPct <= 3){
+        label = '⏳ TUNGGU PULLBACK';
+        note =
+          'Harga masih ' + gapPct.toFixed(2) +
+          '% di atas area entry.';
+      }else{
+        level = 'RED';
+        label = '🚫 JANGAN KEJAR';
+        note =
+          'Harga sudah ' + gapPct.toFixed(2) +
+          '% di atas area entry.';
+      }
+    }else{
+      label = '⏳ TUNGGU KONFIRMASI';
+      note =
+        'Harga di bawah area entry tetapi belum invalid. Jangan menangkap harga turun otomatis.';
+    }
+  }
+
+  let paperRecord = null;
+
+  if(level === 'GREEN'){
+    const ctx = {
+      ticker:item.ticker,
+      signalAction:'WAIT',
+      entryMode:mode,
+      entryLow,
+      entryHigh,
+      invalidation:cutLoss,
+      tp1,
+      tp2,
+      referencePrice:Number(item.close || 0),
+      radarScore:Number(item.score || 0),
+      signalDate:item.signal_date || null
+    };
+
+    paperRecord =
+      recordStockbitPaperTrigger(
+        ctx,
+        price,
+        label
+      );
+
+    if(paperRecord?.blocked){
+      level = 'RED';
+      label = '🚫 PAPER DIBLOKIR';
+    }
+  }
+
+  if(resultEl){
+    resultEl.className =
+      'small ' + stockbitDecisionClass(level);
+
+    resultEl.innerHTML =
+      '<b>' + label + '</b><br>' +
+      'Stockbit ' + compactNumber(price) +
+      ' • ' + note +
+      (
+        paperRecord
+        ? '<br><b>' + paperRecord.message + '</b>'
+        : ''
+      );
+  }
+}
+
+
 async function addPaperTradesBatch(items){
   const candidates =
   Array.isArray(items)
@@ -9251,6 +9396,28 @@ async function runScanner(){
           <div id="scannerLive_${x.ticker}" class="small" style="margin-top:8px;line-height:1.6">
             <span class="yellow">⚡ Menunggu live check...</span>
           </div>
+          <div class="stockbit-confirm" style="margin-top:9px">
+            <div class="stockbit-confirm-title">📱 KONFIRMASI STOCKBIT</div>
+            <div class="stockbit-confirm-row">
+              <input
+                id="scannerStockbitInput_${x.ticker}"
+                class="stockbit-confirm-input"
+                type="text"
+                inputmode="decimal"
+                placeholder="Harga Stockbit"
+                autocomplete="off"
+              />
+              <button
+                class="stockbit-confirm-btn"
+                onclick='confirmScannerStockbit(${JSON.stringify(x)})'
+              >
+                Konfirmasi
+              </button>
+            </div>
+            <div id="scannerStockbitResult_${x.ticker}" class="small" style="margin-top:7px">
+              Masukkan harga terakhir dari Stockbit.
+            </div>
+          </div>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:9px">
             <button class="refresh"
               style="margin-top:0"
@@ -9303,6 +9470,28 @@ async function runScanner(){
           Harga signal ${compactNumber(x.close)}
           • ${scannerSignalAgeText(x)}<br>
           Mode ${String(x.entry_mode || 'PULLBACK')} • Area entry ${compactNumber(x.entry_low)}-${compactNumber(x.entry_high)}
+        </div>
+        <div class="stockbit-confirm" style="margin-top:9px">
+          <div class="stockbit-confirm-title">📱 KONFIRMASI STOCKBIT</div>
+          <div class="stockbit-confirm-row">
+            <input
+              id="scannerStockbitInput_${x.ticker}"
+              class="stockbit-confirm-input"
+              type="text"
+              inputmode="decimal"
+              placeholder="Harga Stockbit"
+              autocomplete="off"
+            />
+            <button
+              class="stockbit-confirm-btn"
+              onclick='confirmScannerStockbit(${JSON.stringify(x)})'
+            >
+              Konfirmasi
+            </button>
+          </div>
+          <div id="scannerStockbitResult_${x.ticker}" class="small" style="margin-top:7px">
+            Masukkan harga terakhir dari Stockbit.
+          </div>
         </div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:9px">
           <button class="refresh"

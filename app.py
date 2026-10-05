@@ -3280,10 +3280,15 @@ def live_quote():
             + timedelta(hours=7)
         )
 
-        if age_seconds <= 20 * 60:
-            freshness = "LIVE"
-        elif age_seconds <= 6 * 3600:
+        # Untuk eksekusi trading, label freshness dibuat lebih ketat.
+        # Yahoo 5m bisa tertinggal beberapa menit, jadi jangan sebut LIVE
+        # bila timestamp sudah cukup jauh dari waktu sekarang.
+        if age_seconds <= 5 * 60:
+            freshness = "FRESH"
+        elif age_seconds <= 15 * 60:
             freshness = "DELAYED"
+        elif age_seconds <= 6 * 3600:
+            freshness = "STALE"
         else:
             freshness = "LAST_SESSION"
 
@@ -3299,7 +3304,7 @@ def live_quote():
             "price_date": jakarta_dt.date().isoformat(),
             "age_seconds": age_seconds,
             "freshness": freshness,
-            "is_intraday_fresh": age_seconds <= 20 * 60,
+            "is_intraday_fresh": age_seconds <= 5 * 60,
             "last_candle_price": (
                 round(last_candle_price, 2)
                 if last_candle_price > 0

@@ -398,6 +398,39 @@ td{
   color:#8298ae;
   line-height:1.4;
 }
+
+.live-price-grid{
+  margin-top:10px;
+  display:grid;
+  grid-template-columns:1fr 1fr 1fr;
+  gap:8px;
+}
+
+.live-price-box{
+  padding:9px 7px;
+  border-radius:10px;
+  background:#081b2c;
+  border:1px solid #173a55;
+  text-align:center;
+}
+
+.live-price-label{
+  font-size:9px;
+  color:#8298ae;
+  margin-bottom:4px;
+}
+
+.live-price-value{
+  font-size:15px;
+  font-weight:900;
+}
+
+.live-price-meta{
+  margin-top:7px;
+  font-size:9px;
+  color:#8298ae;
+  line-height:1.35;
+}
 </style>
 </head>
 
@@ -513,6 +546,25 @@ td{
     </div>
     <div id="tradePlanNote" class="trade-plan-note">
       Tekan Refresh Radar untuk menghitung level harga.
+    </div>
+
+    <div class="live-price-grid">
+      <div class="live-price-box">
+        <div class="live-price-label">⚡ HARGA LIVE</div>
+        <div id="geniusLivePrice" class="live-price-value blue">--</div>
+      </div>
+      <div class="live-price-box">
+        <div class="live-price-label">📌 HARGA ACUAN</div>
+        <div id="geniusReferencePrice" class="live-price-value">--</div>
+      </div>
+      <div class="live-price-box">
+        <div class="live-price-label">↔️ GAP</div>
+        <div id="geniusPriceGap" class="live-price-value yellow">--</div>
+      </div>
+    </div>
+
+    <div id="geniusLiveMeta" class="live-price-meta">
+      Harga live akan dicek otomatis setelah Radar dimuat.
     </div>
   </div>
  
@@ -6466,6 +6518,114 @@ function renderBrokerTable(rows,id){
 }
 
 
+async function refreshGeniusLiveQuote(ticker, referencePrice){
+  const liveEl = document.getElementById('geniusLivePrice');
+  const refEl = document.getElementById('geniusReferencePrice');
+  const gapEl = document.getElementById('geniusPriceGap');
+  const metaEl = document.getElementById('geniusLiveMeta');
+
+  if(refEl){
+    refEl.textContent =
+      referencePrice > 0
+      ? compactNumber(referencePrice)
+      : '--';
+  }
+
+  if(!ticker){
+    if(metaEl){
+      metaEl.textContent = 'Ticker belum tersedia untuk cek harga live.';
+    }
+    return;
+  }
+
+  if(liveEl){
+    liveEl.textContent = '...';
+    liveEl.className = 'live-price-value blue';
+  }
+
+  if(gapEl){
+    gapEl.textContent = '--';
+    gapEl.className = 'live-price-value yellow';
+  }
+
+  if(metaEl){
+    metaEl.textContent = '⚡ Mengecek harga intraday terbaru...';
+  }
+
+  try{
+    const response = await fetch(
+      'https://saham-tracker-api.onrender.com/api/live-quote?ticker=' +
+      encodeURIComponent(ticker),
+      {cache:'no-store'}
+    );
+
+    if(!response.ok){
+      throw new Error('HTTP ' + response.status);
+    }
+
+    const data = await response.json();
+    const livePrice = Number(data.price || 0);
+
+    if(livePrice <= 0){
+      throw new Error('Harga live belum tersedia');
+    }
+
+    if(liveEl){
+      liveEl.textContent = compactNumber(livePrice);
+      liveEl.className = 'live-price-value blue';
+    }
+
+    if(referencePrice > 0){
+      const gapPct =
+        ((livePrice / referencePrice) - 1) * 100;
+      const absGap = Math.abs(gapPct);
+
+      if(gapEl){
+        gapEl.textContent =
+          (gapPct > 0 ? '+' : '') +
+          gapPct.toFixed(2) + '%';
+
+        let gapClass = 'green';
+        if(absGap > 2){
+          gapClass = 'red';
+        }else if(absGap > 0.75){
+          gapClass = 'yellow';
+        }
+
+        gapEl.className =
+          'live-price-value ' + gapClass;
+      }
+    }
+
+    if(metaEl){
+      const freshness =
+        String(data.freshness || 'UNKNOWN').toUpperCase();
+
+      const timeText =
+        data.price_time_wib
+        ? ' • ' + data.price_time_wib + ' WIB'
+        : '';
+
+      metaEl.textContent =
+        'Sumber: ' +
+        (data.source || 'Yahoo Finance intraday') +
+        ' • ' + freshness +
+        timeText;
+    }
+
+  }catch(error){
+    if(liveEl){
+      liveEl.textContent = '--';
+    }
+
+    if(metaEl){
+      metaEl.textContent =
+        '⚠️ Harga live gagal dimuat sementara. Harga acuan tetap berasal dari analisa Radar.';
+    }
+  }
+}
+
+
 function renderRadar(raw){
 
   const data =
@@ -6814,6 +6974,28 @@ function renderRadar(raw){
         ' • Harga acuan ' + compactNumber(levels.close)
     )
   : 'Tekan Refresh Radar untuk menghitung level harga.';
+
+  const liveTicker =
+    String(
+      raw?.ticker ||
+      data?.ticker ||
+      document.getElementById('tickerInput')?.value ||
+      ''
+    )
+    .trim()
+    .toUpperCase();
+
+  const liveReferencePrice =
+    Number(
+      levels.close ||
+      trendMetrics.latest_close ||
+      0
+    );
+
+  refreshGeniusLiveQuote(
+    liveTicker,
+    liveReferencePrice
+  );
 
   document
   .getElementById('signalLevels')

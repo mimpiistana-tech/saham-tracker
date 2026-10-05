@@ -4694,6 +4694,148 @@ async function addPaperTrade(item){
   }
 }
 
+function formatWibTimestamp(date){
+  const parts =
+    new Intl.DateTimeFormat(
+      'en-CA',
+      {
+        timeZone:'Asia/Jakarta',
+        year:'numeric',
+        month:'2-digit',
+        day:'2-digit',
+        hour:'2-digit',
+        minute:'2-digit',
+        second:'2-digit',
+        hour12:false
+      }
+    )
+    .formatToParts(date)
+    .reduce((acc,p)=>{
+      acc[p.type] = p.value;
+      return acc;
+    },{});
+
+  return (
+    parts.year + '-' +
+    parts.month + '-' +
+    parts.day + ' ' +
+    parts.hour + ':' +
+    parts.minute + ':' +
+    parts.second
+  );
+}
+
+function parseManualWibTime(value){
+  const raw = String(value || '').trim();
+
+  if(!raw){
+    return new Date();
+  }
+
+  const match =
+    raw.match(
+      /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?$/
+    );
+
+  if(!match){
+    return null;
+  }
+
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const hour = Number(match[4]);
+  const minute = Number(match[5]);
+  const second = Number(match[6] || 0);
+
+  if(
+    month < 1 || month > 12 ||
+    day < 1 || day > 31 ||
+    hour < 0 || hour > 23 ||
+    minute < 0 || minute > 59 ||
+    second < 0 || second > 59
+  ){
+    return null;
+  }
+
+  return new Date(
+    Date.UTC(
+      year,
+      month - 1,
+      day,
+      hour - 7,
+      minute,
+      second
+    )
+  );
+}
+
+function markPaperTp1Manual(id){
+  const rows = getPaperTrades();
+  const item = rows.find(x => x.id === id);
+
+  if(!item) return;
+
+  if(item.status !== 'OPEN'){
+    alert(
+      'TP1 Manual hanya bisa dicatat saat status masih OPEN.'
+    );
+    return;
+  }
+
+  const whenInput =
+    prompt(
+      'Waktu TP1 WIB (YYYY-MM-DD HH:MM).\n' +
+      'Kosongkan jika baru saja kena TP1.\n' +
+      'Untuk kejadian kemarin, isi waktunya bila ingat.',
+      ''
+    );
+
+  if(whenInput === null){
+    return;
+  }
+
+  const eventDate =
+    parseManualWibTime(whenInput);
+
+  if(!eventDate || Number.isNaN(eventDate.getTime())){
+    alert(
+      'Format waktu tidak valid. Contoh: 2026-10-04 14:30'
+    );
+    return;
+  }
+
+  const wibText =
+    formatWibTimestamp(eventDate);
+
+  const ok =
+    confirm(
+      'Catat TP1 manual ' + item.ticker +
+      ' @ ' + compactNumber(item.tp1) +
+      ' pada ' + wibText + ' WIB?'
+    );
+
+  if(!ok){
+    return;
+  }
+
+  item.status = 'TP1_HIT';
+  item.tp1_hit = true;
+  item.tp1_manual = true;
+  item.tp1_hit_price = Number(item.tp1 || 0);
+  item.tp1_time = eventDate.toISOString();
+  item.tp1_time_wib = wibText;
+  item.monitor_note =
+    'TP1 manual dicatat @ ' +
+    compactNumber(item.tp1) +
+    ' • ' + wibText +
+    ' WIB. Lanjut pantau TP2 atau CL.';
+
+  savePaperTrades(rows);
+  renderPaperTrades();
+}
+
+
 function closePaperTrade(id, result){
   const rows = getPaperTrades();
   const item = rows.find(x => x.id === id);
@@ -4765,6 +4907,14 @@ async function updatePaperTrade(item){
   '&entry_mode=' + encodeURIComponent(item.entry_mode || 'PULLBACK') +
   '&already_entered=' + encodeURIComponent(
     item.manual_stockbit_trigger || item.entry_triggered ? '1' : '0'
+  ) +
+  '&already_tp1_hit=' + encodeURIComponent(
+    item.tp1_manual || item.tp1_hit ? '1' : '0'
+  ) +
+  '&manual_tp1_ts=' + encodeURIComponent(
+    item.tp1_time
+    ? Math.floor(new Date(item.tp1_time).getTime() / 1000)
+    : ''
   );
 
   const response =
@@ -4776,8 +4926,16 @@ async function updatePaperTrade(item){
 
   const data = await response.json();
 
-  const nextStatus =
+  const monitoredStatus =
   data.state || item.status;
+
+  const nextStatus =
+  (
+    item.tp1_manual &&
+    monitoredStatus === 'OPEN'
+  )
+  ? 'TP1_HIT'
+  : monitoredStatus;
 
   let entryGateSnapshot = null;
 
@@ -4857,8 +5015,22 @@ async function updatePaperTrade(item){
       data.pnl_pct == null
       ? null
       : Number(data.pnl_pct),
-    monitor_note: data.note || '',
-    tp1_hit: Boolean(data.tp1_hit),
+    monitor_note:
+      item.tp1_manual && nextStatus === 'TP1_HIT'
+      ? item.monitor_note
+      : (data.note || ''),
+    tp1_hit: Boolean(
+      data.tp1_hit ||
+      item.tp1_hit ||
+      item.tp1_manual
+    ),
+    tp1_time:
+      data.tp1_time ||
+      item.tp1_time ||
+      null,
+    tp1_time_wib:
+      item.tp1_time_wib ||
+      null,
     entry_triggered: Boolean(data.entry_triggered),
     high_since: Number(data.high_since || 0),
     low_since: Number(data.low_since || 0),
@@ -5140,6 +5312,7 @@ function renderPaperTradeCard(x, history=false){
         ${x.regime_gate_sample ? ' • sampel ' + Number(x.regime_gate_sample) : ''}
         ${x.signal_date ? '<br>📅 Signal ' + x.signal_date + ' • close ' + compactNumber(x.signal_close) : ''}
         ${x.trigger_time_wib ? '<br>📍 Trigger Stockbit ' + compactNumber(x.trigger_price || x.entry) + ' • ' + x.trigger_time_wib + ' WIB' : ''}
+        ${x.tp1_manual ? '<br>✅ TP1 Manual ' + compactNumber(x.tp1_hit_price || x.tp1) + ' • ' + (x.tp1_time_wib || x.tp1_time || '-') + (x.tp1_time_wib ? ' WIB' : '') : ''}
         ${x.live_validation_status ? '<br>⚡ Live check ' + x.live_validation_status + ' • ' + (x.live_freshness || 'UNKNOWN') + (x.live_gap_entry_pct == null ? '' : ' • gap vs entry ' + (Number(x.live_gap_entry_pct) >= 0 ? '+' : '') + Number(x.live_gap_entry_pct).toFixed(2) + '%') : ''}
         ${entryHint}
         ${riskPlanHtml}
@@ -5166,8 +5339,11 @@ function renderPaperTradeCard(x, history=false){
             <button class="refresh" style="margin-top:0;background:#ff7180" onclick="deletePaperTrade(${x.id})">🗑️ Hapus</button>
           </div>
         ` : isOpen ? `
-          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-top:7px">
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:7px">
             <button class="refresh" style="margin-top:0" onclick="refreshAllPaperTrades()">🔄 Harga</button>
+            ${x.status === 'OPEN' ? `
+              <button class="refresh" style="margin-top:0;background:#19e6a2;color:#062016" onclick="markPaperTp1Manual(${x.id})">✅ TP1 Manual</button>
+            ` : ''}
             <button class="refresh" style="margin-top:0;background:#ffd166" onclick="closePaperTrade(${x.id},'TP')">✅ Tutup TP</button>
             <button class="refresh" style="margin-top:0;background:#ff7180" onclick="deletePaperTrade(${x.id})">🗑️ Hapus</button>
           </div>

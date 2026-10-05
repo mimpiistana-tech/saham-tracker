@@ -431,6 +431,65 @@ td{
   color:#8298ae;
   line-height:1.35;
 }
+
+.stockbit-confirm{
+  margin-top:10px;
+  padding:10px;
+  border-radius:12px;
+  background:#081b2c;
+  border:1px solid #214766;
+}
+
+.stockbit-confirm-title{
+  font-size:11px;
+  font-weight:900;
+  color:#cfe4f5;
+  margin-bottom:7px;
+}
+
+.stockbit-confirm-row{
+  display:grid;
+  grid-template-columns:1fr auto;
+  gap:8px;
+}
+
+.stockbit-confirm-input{
+  width:100%;
+  min-width:0;
+  box-sizing:border-box;
+  padding:10px 11px;
+  border-radius:10px;
+  border:1px solid #193c59;
+  background:#071827;
+  color:#edf6ff;
+  font-size:15px;
+  font-weight:800;
+}
+
+.stockbit-confirm-btn{
+  border:0;
+  border-radius:10px;
+  padding:10px 12px;
+  background:#19e6a2;
+  color:#062016;
+  font-size:12px;
+  font-weight:900;
+}
+
+.stockbit-confirm-result{
+  margin-top:8px;
+  padding:9px 10px;
+  border-radius:10px;
+  background:#0e2a42;
+  font-size:11px;
+  line-height:1.45;
+}
+
+.stockbit-confirm-meta{
+  margin-top:6px;
+  font-size:9px;
+  color:#8298ae;
+}
 </style>
 </head>
 
@@ -565,6 +624,32 @@ td{
 
     <div id="geniusLiveMeta" class="live-price-meta">
       Harga live akan dicek otomatis setelah Radar dimuat.
+    </div>
+
+    <div class="stockbit-confirm">
+      <div class="stockbit-confirm-title">📱 KONFIRMASI HARGA STOCKBIT</div>
+      <div class="stockbit-confirm-row">
+        <input
+          id="stockbitPriceInput"
+          class="stockbit-confirm-input"
+          type="text"
+          inputmode="decimal"
+          placeholder="Contoh 3080"
+          autocomplete="off"
+        />
+        <button
+          class="stockbit-confirm-btn"
+          onclick="confirmStockbitPrice()"
+        >
+          Konfirmasi
+        </button>
+      </div>
+      <div id="stockbitConfirmResult" class="stockbit-confirm-result">
+        Masukkan harga terakhir yang terlihat di Stockbit.
+      </div>
+      <div id="stockbitConfirmMeta" class="stockbit-confirm-meta">
+        Harga manual tidak mengubah score; hanya memvalidasi posisi harga terhadap rencana trade.
+      </div>
     </div>
   </div>
  
@@ -6534,6 +6619,208 @@ function renderBrokerTable(rows,id){
 }
 
 
+let stockbitConfirmContext = null;
+
+function parseStockbitPrice(value){
+  const raw = String(value || '').trim();
+  if(!raw){
+    return 0;
+  }
+
+  // Format Indonesia seperti 3.080 / 12.500 dianggap pemisah ribuan.
+  if(/^\d{1,3}([\.,]\d{3})+$/.test(raw)){
+    return Number(raw.replace(/[\.,]/g,''));
+  }
+
+  const normalized =
+    raw.replace(/\s/g,'').replace(',','.');
+
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function stockbitDecisionClass(level){
+  if(level === 'GREEN') return 'green';
+  if(level === 'RED') return 'red';
+  return 'yellow';
+}
+
+function confirmStockbitPrice(){
+  const input =
+    document.getElementById('stockbitPriceInput');
+  const resultEl =
+    document.getElementById('stockbitConfirmResult');
+  const metaEl =
+    document.getElementById('stockbitConfirmMeta');
+
+  const price =
+    parseStockbitPrice(input?.value);
+
+  if(!price || price <= 0){
+    if(resultEl){
+      resultEl.className =
+        'stockbit-confirm-result red';
+      resultEl.textContent =
+        'Harga Stockbit belum valid. Contoh: 3080 atau 3.080.';
+    }
+    return;
+  }
+
+  const ctx = stockbitConfirmContext;
+
+  if(!ctx || !ctx.entryLow){
+    if(resultEl){
+      resultEl.className =
+        'stockbit-confirm-result yellow';
+      resultEl.textContent =
+        'Rencana trade belum tersedia. Refresh Radar dulu.';
+    }
+    return;
+  }
+
+  const mode =
+    String(ctx.entryMode || 'PULLBACK').toUpperCase();
+  const action =
+    String(ctx.signalAction || 'WAIT').toUpperCase();
+
+  let level = 'YELLOW';
+  let label = '⏳ TUNGGU';
+  let note = '';
+
+  if(
+    ctx.invalidation > 0 &&
+    price <= ctx.invalidation
+  ){
+    level = 'RED';
+    label = '🚫 INVALID / JANGAN ENTRY';
+    note =
+      'Harga sudah menyentuh/di bawah level invalidasi ' +
+      compactNumber(ctx.invalidation) + '.';
+  }else if(action === 'SELL'){
+    level = 'RED';
+    label = '🚫 JANGAN ENTRY';
+    note =
+      'Signal utama Radar masih SELL/Reduce. Harga manual tidak boleh membatalkan risk gate.';
+  }else if(mode === 'BREAKOUT'){
+    if(price < ctx.entryLow){
+      level = 'YELLOW';
+      label = '⏳ TUNGGU BREAKOUT';
+      note =
+        'Harga Stockbit masih di bawah trigger ' +
+        compactNumber(ctx.entryLow) + '.';
+    }else{
+      const gapPct =
+        ((price / ctx.entryLow) - 1) * 100;
+
+      if(gapPct <= 3){
+        level = 'GREEN';
+        label = '🧪 SIAP PAPER BREAKOUT';
+        note =
+          'Harga Stockbit sudah melewati trigger dan masih dekat (' +
+          gapPct.toFixed(2) + '% di atas trigger).';
+      }else{
+        level = 'RED';
+        label = '🚫 JANGAN KEJAR';
+        note =
+          'Harga sudah ' + gapPct.toFixed(2) +
+          '% di atas trigger breakout. Tunggu retest/setup baru.';
+      }
+    }
+  }else{
+    if(price >= ctx.entryLow && price <= ctx.entryHigh){
+      level = 'GREEN';
+      label = '🧪 PASANG BID PAPER';
+      note =
+        'Harga Stockbit berada di area pullback ' +
+        compactNumber(ctx.entryLow) + '-' +
+        compactNumber(ctx.entryHigh) + '.';
+    }else if(price > ctx.entryHigh){
+      const gapPct =
+        ((price / ctx.entryHigh) - 1) * 100;
+
+      if(gapPct <= 3){
+        level = 'YELLOW';
+        label = '⏳ TUNGGU PULLBACK';
+        note =
+          'Harga masih ' + gapPct.toFixed(2) +
+          '% di atas batas atas area entry. Jangan kejar.';
+      }else{
+        level = 'RED';
+        label = '🚫 JANGAN KEJAR';
+        note =
+          'Harga sudah ' + gapPct.toFixed(2) +
+          '% di atas area pullback. Tunggu setup baru.';
+      }
+    }else{
+      level = 'YELLOW';
+      label = '⏳ TUNGGU KONFIRMASI';
+      note =
+        'Harga sudah di bawah area entry tetapi belum menyentuh invalidasi. Jangan otomatis menangkap harga turun.';
+    }
+  }
+
+  const machineNote =
+    action === 'BUY'
+    ? 'Signal utama Radar: BUY.'
+    : 'Signal utama Radar: ' + action +
+      '. Ini konfirmasi harga untuk paper/monitor, bukan izin uang asli.';
+
+  if(resultEl){
+    resultEl.className =
+      'stockbit-confirm-result ' +
+      stockbitDecisionClass(level);
+
+    resultEl.innerHTML =
+      '<b>' + label + '</b><br>' +
+      'Stockbit ' + compactNumber(price) +
+      ' • ' + note +
+      '<br>' + machineNote;
+  }
+
+  const now = new Date();
+  const wib =
+    new Intl.DateTimeFormat(
+      'id-ID',
+      {
+        timeZone:'Asia/Jakarta',
+        hour:'2-digit',
+        minute:'2-digit',
+        second:'2-digit',
+        hour12:false
+      }
+    ).format(now);
+
+  if(metaEl){
+    metaEl.textContent =
+      'Konfirmasi manual ' +
+      String(ctx.ticker || '') +
+      ' • ' + wib + ' WIB';
+  }
+
+  try{
+    localStorage.setItem(
+      'stockradar_stockbit_confirm_' +
+      String(ctx.ticker || ''),
+      JSON.stringify({
+        ticker:ctx.ticker,
+        price,
+        confirmed_at:now.toISOString(),
+        entry_mode:mode,
+        decision:label,
+        entry_low:ctx.entryLow,
+        entry_high:ctx.entryHigh,
+        invalidation:ctx.invalidation,
+        tp1:ctx.tp1,
+        tp2:ctx.tp2,
+        signal_action:action
+      })
+    );
+  }catch(e){
+    console.log('Stockbit confirm save failed',e);
+  }
+}
+
+
 async function refreshGeniusLiveQuote(ticker, referencePrice){
   const liveEl = document.getElementById('geniusLivePrice');
   const refEl = document.getElementById('geniusReferencePrice');
@@ -7025,6 +7312,42 @@ function renderRadar(raw){
 
   const entryHigh =
     Number(levels.entry_high || levels.buy_pullback_high || 0);
+
+  stockbitConfirmContext = {
+    ticker:
+      String(
+        raw?.ticker ||
+        data?.ticker ||
+        document.getElementById('tickerInput')?.value ||
+        ''
+      ).trim().toUpperCase(),
+    signalAction:
+      hasSignal ? String(signal.action || 'WAIT').toUpperCase() : 'WAIT',
+    entryMode,
+    entryLow,
+    entryHigh,
+    invalidation:Number(levels.invalidation || 0),
+    tp1:Number(levels.tp1_reference || 0),
+    tp2:Number(levels.tp2_reference || 0),
+    referencePrice:Number(levels.close || 0)
+  };
+
+  const stockbitResult =
+    document.getElementById('stockbitConfirmResult');
+  const stockbitMeta =
+    document.getElementById('stockbitConfirmMeta');
+
+  if(stockbitResult){
+    stockbitResult.className =
+      'stockbit-confirm-result';
+    stockbitResult.textContent =
+      'Masukkan harga terakhir yang terlihat di Stockbit.';
+  }
+
+  if(stockbitMeta){
+    stockbitMeta.textContent =
+      'Harga manual tidak mengubah score; hanya memvalidasi posisi harga terhadap rencana trade.';
+  }
 
   document
   .getElementById('buyPrice')
@@ -9280,6 +9603,18 @@ localStorage.getItem(
   document.getElementById('sellPrice').textContent = '--';
   document.getElementById('cutLossPrice').textContent = '--';
   document.getElementById('tradePlanNote').textContent = 'Tekan Refresh Radar untuk menghitung level harga.';
+  stockbitConfirmContext = null;
+  const stockbitInput = document.getElementById('stockbitPriceInput');
+  const stockbitResult = document.getElementById('stockbitConfirmResult');
+  const stockbitMeta = document.getElementById('stockbitConfirmMeta');
+  if(stockbitInput) stockbitInput.value = '';
+  if(stockbitResult){
+    stockbitResult.className = 'stockbit-confirm-result';
+    stockbitResult.textContent = 'Masukkan harga terakhir yang terlihat di Stockbit.';
+  }
+  if(stockbitMeta){
+    stockbitMeta.textContent = 'Harga manual tidak mengubah score; hanya memvalidasi posisi harga terhadap rencana trade.';
+  }
   document.getElementById('netFlow').textContent = '--';
   document.getElementById('activeBrokers').textContent = '--';
   document.getElementById('geniusConclusion').textContent =

@@ -6601,6 +6601,19 @@ async function refreshGeniusLiveQuote(ticker, referencePrice){
       const freshness =
         String(data.freshness || 'UNKNOWN').toUpperCase();
 
+      const ageSeconds = Number(data.age_seconds || 0);
+      let ageText = 'umur data tidak diketahui';
+
+      if(ageSeconds >= 0){
+        if(ageSeconds < 60){
+          ageText = ageSeconds + ' detik lalu';
+        }else if(ageSeconds < 3600){
+          ageText = Math.floor(ageSeconds / 60) + ' menit lalu';
+        }else{
+          ageText = (ageSeconds / 3600).toFixed(1) + ' jam lalu';
+        }
+      }
+
       const timeText =
         data.price_time_wib
         ? ' • ' + data.price_time_wib + ' WIB'
@@ -6610,7 +6623,18 @@ async function refreshGeniusLiveQuote(ticker, referencePrice){
         'Sumber: ' +
         (data.source || 'Yahoo Finance intraday') +
         ' • ' + freshness +
+        ' • ' + ageText +
         timeText;
+
+      if(freshness === 'STALE' || freshness === 'LAST_SESSION'){
+        if(gapEl){
+          gapEl.className = 'live-price-value red';
+        }
+      }else if(freshness === 'DELAYED'){
+        if(gapEl && !gapEl.className.includes('red')){
+          gapEl.className = 'live-price-value yellow';
+        }
+      }
     }
 
   }catch(error){

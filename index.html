@@ -4611,7 +4611,10 @@ async function updatePaperTrade(item){
   '&tp1=' + encodeURIComponent(item.tp1) +
   '&tp2=' + encodeURIComponent(item.tp2) +
   '&cl=' + encodeURIComponent(item.cut_loss) +
-  '&entry_mode=' + encodeURIComponent(item.entry_mode || 'PULLBACK');
+  '&entry_mode=' + encodeURIComponent(item.entry_mode || 'PULLBACK') +
+  '&already_entered=' + encodeURIComponent(
+    item.manual_stockbit_trigger || item.entry_triggered ? '1' : '0'
+  );
 
   const response =
   await fetch(url,{cache:'no-store'});
@@ -4985,6 +4988,7 @@ function renderPaperTradeCard(x, history=false){
         <br>🧠 Regime Gate: ${x.market_regime || 'Unknown'} • ${x.regime_gate_status || 'LEARNING'}
         ${x.regime_gate_sample ? ' • sampel ' + Number(x.regime_gate_sample) : ''}
         ${x.signal_date ? '<br>📅 Signal ' + x.signal_date + ' • close ' + compactNumber(x.signal_close) : ''}
+        ${x.trigger_time_wib ? '<br>📍 Trigger Stockbit ' + compactNumber(x.trigger_price || x.entry) + ' • ' + x.trigger_time_wib + ' WIB' : ''}
         ${x.live_validation_status ? '<br>⚡ Live check ' + x.live_validation_status + ' • ' + (x.live_freshness || 'UNKNOWN') + (x.live_gap_entry_pct == null ? '' : ' • gap vs entry ' + (Number(x.live_gap_entry_pct) >= 0 ? '+' : '') + Number(x.live_gap_entry_pct).toFixed(2) + '%') : ''}
         ${entryHint}
         ${riskPlanHtml}
@@ -6645,6 +6649,159 @@ function stockbitDecisionClass(level){
   return 'yellow';
 }
 
+function recordStockbitPaperTrigger(ctx,price,decisionLabel){
+  const rows = getPaperTrades();
+  const activeStatuses =
+    new Set(['WAIT_ENTRY','OPEN','TP1_HIT']);
+
+  const existing =
+    rows.find(x =>
+      x.ticker === ctx.ticker &&
+      activeStatuses.has(x.status)
+    );
+
+  if(existing){
+    return {
+      ok:false,
+      blocked:false,
+      message:
+        'Paper ' + ctx.ticker +
+        ' sudah aktif (' + paperStatusLabel(existing.status) + '), jadi tidak dibuat duplikat.'
+    };
+  }
+
+  const entry = Number(price || 0);
+  const tp1 = Number(ctx.tp1 || 0);
+  const tp2 = Number(ctx.tp2 || 0);
+  const cutLoss = Number(ctx.invalidation || 0);
+
+  if(
+    entry <= 0 ||
+    cutLoss <= 0 ||
+    tp1 <= entry ||
+    tp2 <= tp1 ||
+    cutLoss >= entry
+  ){
+    return {
+      ok:false,
+      blocked:true,
+      message:
+        'Paper tidak dicatat karena entry/TP/CL aktual tidak lagi membentuk rencana yang valid.'
+    };
+  }
+
+  const now = new Date();
+  const createdTs =
+    Math.floor(now.getTime() / 1000);
+
+  const wib =
+    new Intl.DateTimeFormat(
+      'id-ID',
+      {
+        timeZone:'Asia/Jakarta',
+        year:'numeric',
+        month:'2-digit',
+        day:'2-digit',
+        hour:'2-digit',
+        minute:'2-digit',
+        second:'2-digit',
+        hour12:false
+      }
+    ).format(now);
+
+  const proposedTrade = {
+    id:Date.now(),
+    ticker:ctx.ticker,
+    entry,
+    planned_entry_low:Number(ctx.entryLow || 0),
+    planned_entry_high:Number(ctx.entryHigh || 0),
+    trigger_price:entry,
+    trigger_time:now.toISOString(),
+    trigger_time_wib:wib,
+    tp1,
+    tp2,
+    cut_loss:cutLoss,
+    status:'OPEN',
+    setup:'Genius ' + String(ctx.entryMode || 'PULLBACK'),
+    scanner_score:0,
+    radar_score:Number(ctx.radarScore || 0),
+    market_regime:'Unknown',
+    regime_gate_status:'LEARNING',
+    regime_gate_reason:'',
+    regime_gate_sample:0,
+    created_at:now.toISOString(),
+    created_ts:createdTs,
+    entry_time:now.toISOString(),
+    entry_time_wib:wib,
+    source:'stockbit_manual_trigger',
+    manual_stockbit_trigger:true,
+    entry_triggered:true,
+    entry_mode:String(ctx.entryMode || 'PULLBACK').toUpperCase(),
+    signal_date:ctx.signalDate || null,
+    signal_close:Number(ctx.referencePrice || 0),
+    signal_action:String(ctx.signalAction || 'WAIT').toUpperCase(),
+    live_price_at_add:entry,
+    live_gap_entry_pct:0,
+    live_gap_signal_pct:
+      Number(ctx.referencePrice || 0) > 0
+      ? ((entry / Number(ctx.referencePrice)) - 1) * 100
+      : null,
+    live_validation_status:'MANUAL_CONFIRMED',
+    live_freshness:'STOCKBIT_MANUAL',
+    live_price_time:wib,
+    last_price:entry,
+    pnl_pct:0,
+    monitor_note:
+      'Trigger paper dicatat dari konfirmasi harga Stockbit pada ' +
+      wib + ' WIB • ' + decisionLabel + '.'
+  };
+
+  const riskSettings = getRiskSettings();
+  const tradeGuard =
+    evaluateTradeGuard(proposedTrade,riskSettings);
+
+  if(tradeGuard.level === 'BLOCK'){
+    return {
+      ok:false,
+      blocked:true,
+      message:
+        'Paper diblokir Trade Guard: ' + tradeGuard.reason
+    };
+  }
+
+  const activeRows =
+    rows.filter(x => activeStatuses.has(x.status));
+
+  const portfolioGuard =
+    evaluatePortfolioGuard(
+      [...activeRows,proposedTrade],
+      riskSettings
+    );
+
+  if(portfolioGuard.level === 'BLOCK'){
+    return {
+      ok:false,
+      blocked:true,
+      message:
+        'Paper diblokir Portfolio Guard: ' + portfolioGuard.reason
+    };
+  }
+
+  rows.unshift(proposedTrade);
+  savePaperTrades(rows);
+
+  return {
+    ok:true,
+    blocked:false,
+    trade:proposedTrade,
+    message:
+      '✅ Paper OPEN otomatis tercatat @ ' +
+      compactNumber(entry) +
+      ' • ' + wib + ' WIB.'
+  };
+}
+
+
 function confirmStockbitPrice(){
   const input =
     document.getElementById('stockbitPriceInput');
@@ -6765,6 +6922,22 @@ function confirmStockbitPrice(){
     : 'Signal utama Radar: ' + action +
       '. Ini konfirmasi harga untuk paper/monitor, bukan izin uang asli.';
 
+  let paperRecord = null;
+
+  if(level === 'GREEN'){
+    paperRecord =
+      recordStockbitPaperTrigger(
+        ctx,
+        price,
+        label
+      );
+
+    if(paperRecord?.blocked){
+      level = 'RED';
+      label = '🚫 PAPER DIBLOKIR';
+    }
+  }
+
   if(resultEl){
     resultEl.className =
       'stockbit-confirm-result ' +
@@ -6774,7 +6947,12 @@ function confirmStockbitPrice(){
       '<b>' + label + '</b><br>' +
       'Stockbit ' + compactNumber(price) +
       ' • ' + note +
-      '<br>' + machineNote;
+      '<br>' + machineNote +
+      (
+        paperRecord
+        ? '<br><b>' + paperRecord.message + '</b>'
+        : ''
+      );
   }
 
   const now = new Date();
@@ -7329,7 +7507,12 @@ function renderRadar(raw){
     invalidation:Number(levels.invalidation || 0),
     tp1:Number(levels.tp1_reference || 0),
     tp2:Number(levels.tp2_reference || 0),
-    referencePrice:Number(levels.close || 0)
+    referencePrice:Number(levels.close || 0),
+    radarScore:Number(radarScore || 0),
+    signalDate:
+      raw?.date ||
+      data?.date ||
+      null
   };
 
   const stockbitResult =

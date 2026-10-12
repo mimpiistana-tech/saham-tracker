@@ -585,13 +585,41 @@ def build_scanner_item_from_rows(ticker, rows, cache_state="HIST"):
     }
 
 
+def scanner_closed_cutoff(date_to, now_wib=None):
+    """Last calendar date whose daily candle may be used for live scanner signals.
+
+    The current IDX session is never used before 17:00 WIB: conservative buffer
+    after regular-market closing, without claiming Yahoo has finalized the bar.
+    """
+    requested = datetime.strptime(date_to, "%Y-%m-%d").date()
+    now_wib = now_wib or (datetime.utcnow() + timedelta(hours=7))
+    if requested >= now_wib.date() and now_wib.hour < 17:
+        return now_wib.date() - timedelta(days=1)
+    return requested
+
+
+def scanner_completed_rows(rows, date_to, now_wib=None):
+    cutoff = scanner_closed_cutoff(date_to, now_wib=now_wib)
+    result = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        try:
+            session = datetime.strptime(str(row.get("date")), "%Y-%m-%d").date()
+        except (ValueError, TypeError):
+            continue
+        if session <= cutoff:
+            result.append(row)
+    return result
+
+
 def scan_one_ticker(ticker, date_to):
     data, status, cache_state = get_ohlcv(ticker, date_to)
 
     if status != 200:
         return None
 
-    rows = extract_ohlcv_rows(data)
+    rows = scanner_completed_rows(extract_ohlcv_rows(data), date_to)
 
     return build_scanner_item_from_rows(
         ticker,
@@ -748,15 +776,18 @@ def scanner():
         )
         top_picks.append(pick)
 
-    market_regime = get_current_market_regime(
-        date_to
-    )
+    cutoff_date = scanner_closed_cutoff(date_to)
+    market_regime = get_current_market_regime(cutoff_date.isoformat())
 
     result_data = {
         "success": True,
         "date": date_to,
         "source": "Yahoo Finance OHLCV",
         "mode": mode,
+        "candle_policy": "COMPLETED_DAILY_ONLY",
+        "signal_cutoff_date": cutoff_date.isoformat(),
+        "generated_at_wib": (datetime.utcnow() + timedelta(hours=7)).strftime("%Y-%m-%d %H:%M:%S"),
+        "market_data_is_live": False,
         "market_regime": market_regime,
         "universe_size": len(universe),
         "scanned": len(results),
@@ -3314,8 +3345,13 @@ def live_quote():
                 "error": "Harga terbaru Yahoo tidak tersedia",
             }), 404
 
-        if price_ts <= 0:
-            price_ts = now_ts
+        # Never invent the quote timestamp: that would turn an undated price
+        # into a false FRESH price and could cause an unsafe paper entry.
+        if price_ts <= 0 or price_ts > now_ts + 60:
+            return jsonify({
+                "success": False,
+                "error": "Timestamp Yahoo tidak tersedia atau tidak valid. Jangan entry.",
+            }), 503
 
         age_seconds = max(0, now_ts - price_ts)
         jakarta_dt = (

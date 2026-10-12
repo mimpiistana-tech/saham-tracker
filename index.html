@@ -4173,8 +4173,17 @@ function invalidateManual5m(ticker){
   const btn=document.getElementById('scanner5mPaperBtn_'+ticker);
   if(btn) btn.disabled=true;
   const target=document.getElementById('scanner5mResult_'+ticker);
-  if(target) target.textContent='⏳ Belum valid. Isi volume dan konfirmasi struktur 5m.';
-}
+  if(target){
+    const v=getManual5mValues(ticker);
+    if(Number.isFinite(v.last)&&v.last>0&&Number.isFinite(v.average)&&v.average>0){
+      const ratio=v.last/v.average;
+      target.textContent=ratio<1.3
+        ? '⏳ TUNGGU • Volume '+ratio.toFixed(2)+'× MA20 (minimal 1,30×). Jangan catat paper.'
+        : '📊 Volume '+ratio.toFixed(2)+'× MA20 cukup secara angka. Pastikan candle 5m selesai dan seluruh struktur valid sebelum paper.';
+    }else{
+      target.textContent='⏳ Belum valid. Isi volume candle selesai dan MA20 volume 5m Stockbit.';
+    }
+  }
 function verifyManual5m(ticker){
   invalidateManual5m(ticker);
   const el=document.getElementById('scanner5mResult_'+ticker);
@@ -4212,11 +4221,16 @@ function scanner5mForm(ticker){
   return `
   <div class="stockbit-confirm" style="margin-top:10px">
     <div class="stockbit-confirm-title">📊 Volume Stockbit 5m • Manual</div>
-    <div class="small" style="margin:7px 0">Gunakan volume candle 5m yang SUDAH SELESAI dan MA20 volume 5m dalam satuan yang sama. Contoh 83 dan 2.56K.</div>
-    <div class="stockbit-confirm-row">
-      <input id="scanner5mLast_${ticker}" class="stockbit-confirm-input" type="text" inputmode="decimal" placeholder="Vol 5m, mis. 83" oninput="invalidateManual5m('${ticker}')">
-      <input id="scanner5mAvg_${ticker}" class="stockbit-confirm-input" type="text" inputmode="decimal" placeholder="MA20, mis. 2.56K" oninput="invalidateManual5m('${ticker}')">
+    <div class="small" style="margin:7px 0">Jika Yahoo WAIT_DATA, ambil volume dari grafik Stockbit 5m. Pilih candle yang SUDAH SELESAI, bukan candle berjalan. Jangan mencentang syarat yang belum terbukti.</div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,180px),1fr));gap:10px">
+      <label class="small" style="display:block">Volume candle 5m selesai
+        <input id="scanner5mLast_${ticker}" aria-label="Volume candle 5 menit selesai" class="stockbit-confirm-input" style="display:block;margin-top:6px" type="text" inputmode="decimal" placeholder="Contoh 2.48K" oninput="invalidateManual5m('${ticker}')">
+      </label>
+      <label class="small" style="display:block">MA20 volume 5m (garis rata-rata)
+        <input id="scanner5mAvg_${ticker}" aria-label="MA20 volume 5 menit" class="stockbit-confirm-input" style="display:block;margin-top:6px" type="text" inputmode="decimal" placeholder="Contoh 3.59K" oninput="invalidateManual5m('${ticker}')">
+      </label>
     </div>
+    <div class="small" style="margin:7px 0">Volume minimal 1,30× MA20. Volume saja belum cukup tanpa seluruh syarat candle dan struktur.</div>
     ${flags.map(([id,title])=>`<label class="small" style="display:block;margin:7px 0">
     <input type="checkbox" id="scanner5m_${id}_${ticker}" onchange="invalidateManual5m('${ticker}')"> ${title}</label>`).join('')}
     <button class="stockbit-confirm-btn" onclick="verifyManual5m('${ticker}')">✅ Validasi Manual 5m</button>
@@ -4285,6 +4299,9 @@ async function checkScannerTiming5m(item){
       ' • Swing low '+(data.swing_low==null?'--':compactNumber(data.swing_low))+
       '<br>Bar selesai '+(data.bar_end_wib||'--')+' WIB'+
       '<br>'+checkList+
+      (status==='WAIT_DATA'
+        ? '<br>📱 Yahoo belum cukup: isi volume dari candle selesai dan MA20 grafik Stockbit 5m pada kolom di bawah.'
+        : '')+
       '<br><b>WAJIB cocokkan harga + pantulan dan volume di Stockbit sebelum paper entry.</b>';
   }catch(e){
     target.textContent='⏳ WAIT DATA: '+String(e.message||e)+' • Tidak ada sinyal otomatis.';

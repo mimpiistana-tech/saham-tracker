@@ -9748,10 +9748,6 @@ async function runScanner(mode='quick', force=false){
     scannerCacheNotice + ((topPicksHtml + html) ||
     '<div class="note">Belum ada kandidat yang lolos filter.</div>');
 
-    // Previous fallback preserved as commented reference:
-    /*(topPicksHtml + html) ||
-    '<div class="note">Belum ada kandidat yang lolos filter.</div>';*/
-
     if(topPicks.length){
       refreshScannerLivePrices(topPicks);
     }

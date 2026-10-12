@@ -49,6 +49,15 @@ SCANNER_UNIVERSE = [
     "SCMA", "MNCN", "BMTR", "FILM", "RAAM", "RANS", "NAYZ", "PIPA", "RICY", "MEJA",
 ]
 
+# V2 Quick Scan hanya memproses 20 saham pilihan agar tidak menunggu full universe.
+# Ini watchlist teknikal, BUKAN data live / rekomendasi BUY otomatis.
+QUICK_SCAN_UNIVERSE = [
+    "BBCA", "BBRI", "BMRI", "TLKM", "ASII",
+    "UNTR", "ANTM", "PTBA", "ADRO", "BRMS",
+    "ERAA", "PANI", "PWON", "GOTO", "NAYZ",
+    "PIPA", "RANS", "MEJA", "ARCI", "ADMR",
+]
+
 
 @app.after_request
 def add_cors_headers(response):
@@ -631,6 +640,15 @@ def build_scanner_reason(item):
 @app.route("/api/scanner")
 def scanner():
     date_to = request.args.get("to")
+    mode = request.args.get("mode", "full").strip().lower()
+
+    if mode not in {"quick", "full"}:
+        return jsonify({
+            "success": False,
+            "error": "mode harus quick atau full",
+        }), 400
+
+    universe = QUICK_SCAN_UNIVERSE if mode == "quick" else SCANNER_UNIVERSE
 
     if not date_to:
         return jsonify({
@@ -655,7 +673,7 @@ def scanner():
                 ticker,
                 date_to,
             ): ticker
-            for ticker in SCANNER_UNIVERSE
+            for ticker in universe
         }
 
         for future in as_completed(futures):
@@ -723,11 +741,17 @@ def scanner():
         "success": True,
         "date": date_to,
         "source": "Yahoo Finance OHLCV",
+        "mode": mode,
         "market_regime": market_regime,
-        "universe_size": len(SCANNER_UNIVERSE),
+        "universe_size": len(universe),
         "scanned": len(results),
         "liquidity_filter": "avg value 20D >= Rp2B dan minimal 15 hari aktif",
-        "note": "Scanner V3 menampilkan Top 3 kandidat dari setup actionable, lalu Analisa Full dipakai untuk konfirmasi broker.",
+        "note": (
+            "Quick Scan V2 memproses 20 saham pilihan, bukan seluruh IDX. "
+            "Signal OHLCV bersifat harian; konfirmasi harga aktual di Stockbit."
+            if mode == "quick" else
+            "Full Scan V3 dari universe lebih luas; konfirmasi harga aktual di Stockbit."
+        ),
         "summary": {
             "momentum": len(groups["momentum"]),
             "pullback": len(groups["pullback"]),

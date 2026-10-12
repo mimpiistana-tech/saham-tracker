@@ -1001,6 +1001,7 @@ berapa persen mesin yang sudah aktif.
 
   <div class="card">
     <h2>🔎 Auto Radar Corporate Action BEI</h2>
+    <div class="small">Otomatis memeriksa saat menu Scanner dibuka dan tiap 15 menit selama aplikasi terbuka di menu ini. Bukan notifikasi saat aplikasi ditutup.</div>
     <div class="note">Mencari judul pengumuman resmi BEI tanpa input kode saham. Hanya daftar pertama pengumuman yang dapat dibaca; bukan pantauan seluruh BEI real-time. Tidak membaca detail dokumen otomatis dan bukan sinyal BUY.</div>
     <button class="refresh" onclick="loadAutoCA()">📡 Cari Pengumuman CA Otomatis</button>
     <div id="autoCAResults" style="margin-top:10px"><div class="small">Belum diperiksa. Jika sumber BEI gagal, status akan ditampilkan.</div></div>
@@ -1672,6 +1673,9 @@ function openBottomNav(id,btn){
 
   if(id === 'paper'){
     renderPaperTrades();
+  }
+  if(id === 'scanner'){
+    loadAutoCA(false);  // auto-check on opening Scanner, if not recently checked
   }
 
   window.scrollTo({
@@ -9683,9 +9687,15 @@ async function runAutoPaperWatch(){
     autoPaperBusy=false;
   }
 }
-async function loadAutoCA(){
+const AUTO_CA_CHECK_EVERY_MS = 15*60*1000;
+let autoCALastAttempt = 0;
+let autoCABusy = false;
+async function loadAutoCA(force=true){
   const box=document.getElementById('autoCAResults');
-  if(!box)return;
+  if(!box || autoCABusy)return;
+  if(!force && Date.now()-autoCALastAttempt<AUTO_CA_CHECK_EVERY_MS)return;
+  autoCALastAttempt=Date.now();
+  autoCABusy=true;
   box.textContent='Membaca pengumuman resmi BEI...';
   try{
     const response=await fetch(STOCKRADAR_API_BASE+'/api/ca-discovery',{cache:'no-store'});
@@ -9708,6 +9718,8 @@ async function loadAutoCA(){
        :'<div class="note">Tidak ditemukan judul kategori CA pada halaman yang berhasil dibaca. Ini BUKAN bukti tidak ada aksi korporasi.</div>');
   }catch(e){
     box.textContent='⚠️ WAIT_DATA: gagal menghubungi sumber resmi. Tidak bisa memastikan corporate action terkini.';
+  }finally{
+    autoCABusy=false;
   }
 }
 
@@ -10693,6 +10705,13 @@ updateAlertBadge();
 renderAlerts();
 setupBackgroundMonitor();
 importBackgroundAlerts();
+
+// Only poll when the scanner page is visible. Browsers can pause background tabs.
+setInterval(()=>{
+  const scanner=document.getElementById('scanner');
+  if(document.hidden || !scanner || !scanner.classList.contains('active-section'))return;
+  loadAutoCA(false);
+}, 60 * 1000);
 
 let paperAutoMonitorBusy = false;
 

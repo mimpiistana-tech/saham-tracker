@@ -269,6 +269,17 @@ button.refresh{
   font-size:14px;
 }
 
+/* Scanner paper entry is intentionally unavailable without the
+   separate manual Stockbit validation. Make this unmistakable on phones. */
+button.refresh.scanner-paper-locked:disabled{
+  background:#344657;
+  color:#b9c5d1;
+  border:1px solid #596a7b;
+  box-shadow:none;
+  opacity:1;
+  cursor:not-allowed;
+}
+
 table{
   width:100%;
   border-collapse:collapse;
@@ -9713,9 +9724,9 @@ async function runScanner(mode='quick', force=false){
         <div class="small" style="margin-top:4px">
           Kandidat utama tidak diulang lagi di daftar bawah.
         </div>
-        <button class="refresh"
+        <button class="refresh scanner-paper-locked"
           style="margin-top:10px"
-          disabled title="Validasi Stockbit manual per saham dahulu">
+          disabled title="Auto Paper nonaktif. Validasi manual Stockbit per saham terlebih dahulu">
           🔒 Auto Paper TOP 3 nonaktif
         </button>
         <div id="batchPaperStatus" class="small" style="margin-top:7px">
@@ -9769,10 +9780,10 @@ async function runScanner(mode='quick', force=false){
             ${scanner5mForm(x.ticker)}
           </div>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:9px">
-            <button class="refresh"
+            <button class="refresh scanner-paper-locked"
               style="margin-top:0"
-              disabled title="Gunakan validasi Stockbit 5m manual">
-              🔒 Paper via validasi 5m
+              disabled title="Terkunci. Gunakan tombol Catat Paper setelah validasi Stockbit 5m">
+              🔒 Paper terkunci • cek 5m
             </button>
             <button class="refresh"
               style="margin-top:0"
@@ -9846,10 +9857,10 @@ async function runScanner(mode='quick', force=false){
           ${scanner5mForm(x.ticker)}
         </div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:9px">
-          <button class="refresh"
+          <button class="refresh scanner-paper-locked"
             style="margin-top:0"
-            disabled title="Gunakan validasi Stockbit 5m manual">
-            🔒 Paper via validasi 5m
+            disabled title="Terkunci. Gunakan tombol Catat Paper setelah validasi Stockbit 5m">
+            🔒 Paper terkunci • cek 5m
           </button>
           <button class="refresh"
             style="margin-top:0"

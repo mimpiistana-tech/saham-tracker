@@ -944,9 +944,13 @@ berapa persen mesin yang sudah aktif.
     <div class="note">
       Mesin menyapu kandidat saham otomatis dari data trend, volume, dan risk. Broker summary tidak dipakai saat scan awal agar kuota IndexAlpha tetap hemat.
     </div>
-    <button class="refresh" onclick="runScanner()">
-      🔎 Cari Kandidat Hari Ini
+    <button class="refresh" onclick="runScanner('quick')">
+      ⚡ Scan Cepat (20 saham)
     </button>
+    <button class="refresh" style="margin-top:8px" onclick="runScanner('full')">
+      🔎 Scan Lengkap (lebih lama)
+    </button>
+    <div class="small" style="margin-top:9px">Scan Cepat hanya 20 saham pilihan, bukan seluruh IDX. Harga perlu dikonfirmasi di Stockbit.</div>
   </div>
 
   <div class="card">
@@ -9414,7 +9418,8 @@ async function runHistoricalReplay(){
   }
 }
 
-async function runScanner(){
+async function runScanner(mode='quick'){
+  mode = mode === 'full' ? 'full' : 'quick';
   const date =
   document
   .getElementById('dateInput')
@@ -9429,13 +9434,13 @@ async function runScanner(){
   document.getElementById('scannerResults');
 
   target.innerHTML =
-  '<div class="loading">Memindai saham IDX...</div>';
+  '<div class="loading">' + (mode === 'quick' ? '⚡ Memindai 20 saham pilihan...' : '🔎 Memindai universe lengkap...') + '</div>';
 
   try{
     const response =
     await fetch(
       'https://saham-tracker-api.onrender.com/api/scanner?to=' +
-      encodeURIComponent(date),
+      encodeURIComponent(date) + '&mode=' + encodeURIComponent(mode),
       {cache:'no-store'}
     );
 

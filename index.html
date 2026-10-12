@@ -476,6 +476,15 @@ td{
   font-weight:900;
 }
 
+.stockbit-confirm-btn:disabled{
+  background:#334457;
+  color:#a4b1bf;
+  border:1px solid #4d5d70;
+  opacity:1;
+  cursor:not-allowed;
+  box-shadow:none;
+}
+.stockbit-confirm-btn:not(:disabled){cursor:pointer;}
 .stockbit-confirm-result{
   margin-top:8px;
   padding:9px 10px;
@@ -4171,7 +4180,7 @@ function getManual5mValues(ticker){
 function invalidateManual5m(ticker){
   delete scannerManual5mProofs[ticker];
   const btn=document.getElementById('scanner5mPaperBtn_'+ticker);
-  if(btn) btn.disabled=true;
+  if(btn){btn.disabled=true;btn.textContent='🔒 Catat Paper — belum valid';}
   const target=document.getElementById('scanner5mResult_'+ticker);
   if(target){
     const v=getManual5mValues(ticker);
@@ -4207,7 +4216,7 @@ function verifyManual5m(ticker){
     checks:v.checks.join(','),ratio:result.ratio
   };
   const btn=document.getElementById('scanner5mPaperBtn_'+ticker);
-  if(btn) btn.disabled=false;
+  if(btn){btn.disabled=false;btn.textContent='🧪 Catat Paper (opsional)';}
   if(el) el.textContent='🟢 PAPER WATCH MANUAL: volume '+ratio+
     ' MA20. Data kamu belum diverifikasi otomatis; hanya simulasi.';
 }
@@ -4236,7 +4245,7 @@ function scanner5mForm(ticker){
     <input type="checkbox" id="scanner5m_${id}_${ticker}" onchange="invalidateManual5m('${ticker}')"> ${title}</label>`).join('')}
     <button class="stockbit-confirm-btn" onclick="verifyManual5m('${ticker}')">✅ Validasi Manual 5m</button>
     <div id="scanner5mResult_${ticker}" class="small" style="margin:7px 0">WAIT DATA • Belum ada validasi.</div>
-    <button class="stockbit-confirm-btn" id="scanner5mPaperBtn_${ticker}" disabled onclick="recordConfirmedScannerPaper('${ticker}')">🧪 Catat Paper (opsional)</button>
+    <button class="stockbit-confirm-btn" id="scanner5mPaperBtn_${ticker}" disabled onclick="recordConfirmedScannerPaper('${ticker}')">🔒 Catat Paper — belum valid</button>
   </div>`;
 }
 
@@ -9738,6 +9747,7 @@ async function runScanner(mode='quick', force=false){
             <div class="stockbit-confirm-row">
               <input
                 id="scannerStockbitInput_${x.ticker}"
+                oninput="invalidateManual5m('${x.ticker}')"
                 class="stockbit-confirm-input"
                 type="text"
                 inputmode="decimal"
@@ -9816,6 +9826,7 @@ async function runScanner(mode='quick', force=false){
           <div class="stockbit-confirm-row">
             <input
               id="scannerStockbitInput_${x.ticker}"
+              oninput="invalidateManual5m('${x.ticker}')"
               class="stockbit-confirm-input"
               type="text"
               inputmode="decimal"

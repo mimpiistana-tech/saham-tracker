@@ -68,6 +68,32 @@ class ScannerV2Test(unittest.TestCase):
         self.assertEqual(ten_min_state, "STALE")
         self.assertEqual(daily_state, "HIT")
 
+    def test_live_scan_ignores_unclosed_today_bar(self):
+        from datetime import datetime, timedelta
+        now = datetime(2026, 10, 12, 10, 19)
+        rows = [
+            {"date": "2026-10-09", "close": 100},
+            {"date": "2026-10-12", "close": 999},
+        ]
+        actual = radar.scanner_completed_rows(rows, "2026-10-12", now_wib=now)
+        self.assertEqual([x["close"] for x in actual], [100])
+
+    def test_after_cutoff_today_bar_allowed(self):
+        from datetime import datetime
+        now = datetime(2026, 10, 12, 17, 30)
+        rows = [{"date": "2026-10-09", "close": 100},
+                {"date": "2026-10-12", "close": 999}]
+        actual = radar.scanner_completed_rows(rows, "2026-10-12", now_wib=now)
+        self.assertEqual(len(actual), 2)
+
+    def test_date_filter_rejects_future_candles(self):
+        from datetime import datetime
+        rows = [{"date": "2026-10-12", "close": 100},
+                {"date": "2026-10-13", "close": 200}]
+        actual = radar.scanner_completed_rows(
+            rows, "2026-10-12", now_wib=datetime(2026, 10, 14, 10, 0))
+        self.assertEqual([x["close"] for x in actual], [100])
+
     def test_no_external_requests_during_scanner_smoke(self):
         with patch.object(radar.requests, "get", side_effect=AssertionError("External API called")):
             res = self.client.get("/api/scanner?to=2020-01-02&mode=quick")

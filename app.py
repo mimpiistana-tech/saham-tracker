@@ -3256,6 +3256,141 @@ def market_regime_validation():
 
 
 
+def analyze_5m_bounce(candles, now_ts):
+    """Conservative 5m confirmation from completed same-session candles only.
+
+    Data remains *indicative* Yahoo market data, not an execution signal.
+    Candle timestamps represent starts, so exclude the unfinished bar.
+    """
+    today_wib = (datetime.utcfromtimestamp(now_ts) + timedelta(hours=7)).date()
+    completed = []
+    for item in candles:
+        try:
+            start = int(item["timestamp"])
+            opened = float(item["open"])
+            high = float(item["high"])
+            low = float(item["low"])
+            close = float(item["close"])
+            volume = float(item["volume"])
+        except (KeyError, TypeError, ValueError, OverflowError):
+            continue
+        if not all(v > 0 for v in (opened, high, low, close)):
+            continue
+        if volume < 0 or high < low or not (low <= opened <= high) or not (low <= close <= high):
+            continue
+        candle_day = (datetime.utcfromtimestamp(start) + timedelta(hours=7)).date()
+        if candle_day != today_wib or start + 300 + 30 > now_ts:
+            continue
+        completed.append({"timestamp":start, "open":opened, "high":high,
+                          "low":low, "close":close, "volume":volume})
+
+    completed.sort(key=lambda row:row["timestamp"])
+    # Yahoo occasionally returns duplicate timestamps; retain the most recent.
+    by_start = {item["timestamp"]:item for item in completed}
+    completed = list(by_start.values())
+    last = completed[-1] if completed else None
+    base = {
+        "source":"Yahoo Finance 5m (indikatif, dapat tertunda)",
+        "live_trade_allowed":False,
+        "candle_count":len(completed),
+        "bar_start_wib": (
+            (datetime.utcfromtimestamp(last["timestamp"]) + timedelta(hours=7))
+            .strftime("%Y-%m-%d %H:%M:%S")
+            if last else None
+        ),
+        "bar_end_wib": (
+            (datetime.utcfromtimestamp(last["timestamp"] + 300) + timedelta(hours=7))
+            .strftime("%Y-%m-%d %H:%M:%S")
+            if last else None
+        ),
+        "checks":{},
+        "price_trigger":None,
+        "swing_low":None,
+        "volume_ratio":None,
+    }
+    if len(completed) < 12:
+        return {**base, "status":"WAIT_DATA",
+                "reason":"Belum cukup 12 candle 5m selesai pada sesi hari ini."}
+
+    previous, latest = completed[-2], completed[-1]
+    age = max(0,now_ts-(latest["timestamp"]+300))
+    volumes = [item["volume"] for item in completed[-12:-2]]
+    avg_vol = sum(volumes)/len(volumes) if volumes else 0
+    vol_ratio = latest["volume"]/avg_vol if avg_vol > 0 else None
+    green = latest["close"] > latest["open"]
+    high_break = latest["close"] > previous["high"]
+    higher_low = latest["low"] >= previous["low"]
+    volume_ok = vol_ratio is not None and vol_ratio >= 1.3
+    recent = age <= 15 * 60
+    checks = {
+        "bar_terbaru_max15m":recent,
+        "candle_hijau":green,
+        "close_tembus_high_sebelumnya":high_break,
+        "higher_low":higher_low,
+        "volume_min_1_3x":volume_ok,
+    }
+    passed = all(checks.values())
+    status = ("BOUNCE_CONFIRMED" if passed else
+              "WAIT_DELAYED" if not recent else "WAIT_CONFIRMATION")
+    reason = (
+        "Pantulan, struktur HL dan volume tampak pada candle Yahoo 5m selesai. "
+        "Verifikasi sendiri di Stockbit sebelum pertimbangan paper."
+        if passed else
+        "Candle 5m Yahoo sudah terlalu lama; tunggu pembaruan dan cek Stockbit."
+        if not recent else
+        "Pantulan belum memenuhi semua syarat (candle hijau, tembus high, HL, volume 1,3x)."
+    )
+    return {
+        **base,"status":status,"reason":reason,
+        "age_seconds":age, "checks":checks,
+        "volume_ratio":round(vol_ratio,2) if vol_ratio is not None else None,
+        "price_trigger":round(previous["high"],2),
+        "swing_low":round(min(previous["low"],latest["low"]),2),
+        "last_completed_close":round(latest["close"],2),
+    }
+
+
+@app.route("/api/entry-timing")
+def entry_timing():
+    """READ-ONLY 5m timing check; uses Yahoo, never IndexAlpha or a broker order."""
+    ticker = request.args.get("ticker","").upper().strip()
+    if not ticker or len(ticker) > 7 or not ticker.isascii() or not ticker.isalnum():
+        return jsonify({"success":False,"error":"Ticker harus 1-7 huruf/angka."}),400
+
+    now_ts = int(time.time())
+    try:
+        response = requests.get(
+            f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker}.JK",
+            params={"period1":now_ts-2*24*3600,"period2":now_ts+60,
+                    "interval":"5m","events":"history"},
+            headers={"User-Agent":"Mozilla/5.0 StockRadar/2.0",
+                     "accept":"application/json"},
+            timeout=20,
+        )
+        if response.status_code != 200:
+            return jsonify({"success":False,
+                            "error":f"Yahoo 5m HTTP {response.status_code}"}),502
+        result = ((response.json().get("chart") or {}).get("result") or [None])[0]
+        if not result:
+            return jsonify({"success":False,"error":"Yahoo 5m belum tersedia"}),503
+        stamps = result.get("timestamp") or []
+        quote = (((result.get("indicators") or {}).get("quote") or [{}])[0])
+        keys = ("open","high","low","close","volume")
+        columns = {key:quote.get(key) or [] for key in keys}
+        candles = [
+            {"timestamp":stamp,**{key:(columns[key][i] if i < len(columns[key])
+                                   else None) for key in keys}}
+            for i,stamp in enumerate(stamps)
+        ]
+        analysis = analyze_5m_bounce(candles,now_ts)
+        response = jsonify({"success":True,"ticker":ticker,**analysis})
+        response.headers["Cache-Control"]="no-store"
+        return response
+    except (requests.RequestException,ValueError,TypeError) as error:
+        return jsonify({"success":False,
+                        "error":"Gagal membaca candle Yahoo 5m. Coba lagi."}),503
+
+
 @app.route("/api/live-quote")
 def live_quote():
     """

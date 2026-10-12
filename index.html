@@ -1000,6 +1000,32 @@ berapa persen mesin yang sudah aktif.
   </div>
 
   <div class="card">
+    <h2>🏢 Corporate Action Watchlist</h2>
+    <div class="note">Pantau saham terkait rights issue, merger/akuisisi, dividen, stock split, saham bonus, RUPS, dan aksi lainnya. Daftar ini diisi manual, bukan feed otomatis BEI. Menambahkan ticker bukan bukti aksi korporasi terjadi. Semua tetap WATCH ONLY.</div>
+    <label class="small" for="caTicker">Kode saham</label>
+    <input id="caTicker" maxlength="7" placeholder="Contoh: NAYZ" style="width:100%;margin-top:6px;padding:11px;border-radius:10px;border:1px solid #193c59;background:#071827;color:#edf6ff;box-sizing:border-box;text-transform:uppercase">
+    <label class="small" for="caType" style="display:block;margin-top:10px">Jenis aksi yang ingin dipantau</label>
+    <select id="caType" style="width:100%;margin-top:6px;padding:11px;border-radius:10px;border:1px solid #193c59;background:#071827;color:#edf6ff">
+      <option value="RIGHTS_ISSUE">Rights Issue</option><option value="MERGER_AKUISISI">Merger / Akuisisi</option>
+      <option value="BACKDOOR">Dugaan Backdoor Listing</option><option value="DIVIDEN">Dividen</option>
+      <option value="STOCK_SPLIT">Stock Split / Reverse Split</option><option value="SAHAM_BONUS">Saham Bonus</option>
+      <option value="RUPS">RUPS / RUPSLB</option><option value="LAINNYA">Lainnya / Belum Diketahui</option>
+    </select>
+    <label class="small" for="caDate" style="display:block;margin-top:10px">Tanggal agenda (opsional, bila ada)</label>
+    <input id="caDate" type="date" style="width:100%;margin-top:6px;padding:11px;border-radius:10px;border:1px solid #193c59;background:#071827;color:#edf6ff;box-sizing:border-box">
+    <label class="small" for="caSource" style="display:block;margin-top:10px">Tautan pengumuman/sumber (opsional)</label>
+    <input id="caSource" type="url" placeholder="https://..." style="width:100%;margin-top:6px;padding:11px;border-radius:10px;border:1px solid #193c59;background:#071827;color:#edf6ff;box-sizing:border-box">
+    <label class="small" for="caNote" style="display:block;margin-top:10px">Catatan / alasan pantauan (opsional)</label>
+    <input id="caNote" maxlength="250" placeholder="Catat informasi yang perlu dicek..." style="width:100%;margin-top:6px;padding:11px;border-radius:10px;border:1px solid #193c59;background:#071827;color:#edf6ff;box-sizing:border-box">
+    <button class="refresh" style="margin-top:10px" onclick="addCAWatch()">➕ Tambah Pantauan CA</button>
+    <button class="refresh" style="margin-top:8px" onclick="runMoverScan('ca')">📈 Cek Pergerakan Saham CA</button>
+    <div class="small" style="margin-top:8px">Maksimal 15 kode saham. Daftar tersimpan hanya di browser/perangkat ini, tidak tersinkron ke akun lain.</div>
+    <div class="small" style="margin-top:8px">Periksa dokumen emiten langsung di <a href="https://idx.co.id/id/perusahaan-tercatat/profil-perusahaan-tercatat" target="_blank" rel="noopener noreferrer" style="color:#19e6a2">situs resmi BEI</a>. Status verifikasi di bawah bukan hasil pengecekan otomatis.</div>
+    <div id="caWatchResults" style="margin-top:10px"><div class="loading">Belum ada pantauan CA.</div></div>
+    <div id="caMoverResults" style="margin-top:10px"><div class="small">Belum ada pengecekan harga ticker CA.</div></div>
+  </div>
+
+  <div class="card">
     <h2>🏆 Hasil Scanner</h2>
     <div class="note" style="border:1px solid #19e6a2;margin:7px 0;padding:9px">🛡️ V2-MANUAL-5M • Konfirmasi cek harga saja. Paper memerlukan cek volume dan struktur 5m manual.</div>
     <div id="scannerResults">
@@ -9650,12 +9676,85 @@ async function runAutoPaperWatch(){
     autoPaperBusy=false;
   }
 }
+const CA_WATCH_KEY = 'stockradar-v2-ca-watchlist-v1';
+const CA_TYPE_LABELS = {
+  RIGHTS_ISSUE:'Rights Issue',MERGER_AKUISISI:'Merger / Akuisisi',
+  BACKDOOR:'Dugaan Backdoor Listing',DIVIDEN:'Dividen',
+  STOCK_SPLIT:'Stock Split / Reverse Split',SAHAM_BONUS:'Saham Bonus',
+  RUPS:'RUPS / RUPSLB',LAINNYA:'Lainnya / Belum Diketahui'
+};
+function caHtmlEscape(value) {
+  return String(value == null ? '' : value).replace(/[&<>"']/g, ch=>({
+    '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+  }[ch]));
+}
+function getCAWatch() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(CA_WATCH_KEY)||'[]');
+    if(!Array.isArray(raw)) return [];
+    return raw.filter(x=>x && /^[A-Z0-9]{1,7}$/.test(x.ticker||'')).slice(0,15);
+  } catch(e) {return [];}
+}
+function saveCAWatch(rows) {
+  try {localStorage.setItem(CA_WATCH_KEY,JSON.stringify(rows));return true;}
+  catch(e) {alert('Penyimpanan browser tidak tersedia. Periksa mode privat atau kapasitas penyimpanan.');return false;}
+}
+function renderCAWatch() {
+  const element=document.getElementById('caWatchResults');
+  if(!element)return;
+  const items=getCAWatch();
+  if(!items.length){element.innerHTML='<div class="note">Belum ada ticker CA. Tambahkan kode saham untuk memulai pantauan.</div>';return;}
+  element.innerHTML=items.map((item,index)=>'<div class="status-box" style="margin-top:8px">'
+    +'<b>'+caHtmlEscape(item.ticker)+'</b> • '+caHtmlEscape(CA_TYPE_LABELS[item.type]||'Lainnya')
+    +'<div class="small">Status: PERLU VERIFIKASI MANUAL • '
+    +(item.date?'Agenda dicatat: '+caHtmlEscape(item.date):'Tanggal belum dicatat')
+    +(item.note?'<br>Catatan: '+caHtmlEscape(item.note):'')
+    +(item.source?'<br><a target="_blank" rel="noopener noreferrer" style="color:#19e6a2" href="'+caHtmlEscape(item.source)+'">Buka tautan sumber (belum diverifikasi StockRadar)</a>':'<br>Belum ada tautan sumber resmi')
+    +'</div><button class="refresh" style="margin-top:8px;background:#30445d;color:#fff" onclick="removeCAWatch('+index+')">Hapus Pantauan</button></div>'
+  ).join('');
+}
+function addCAWatch() {
+  const ticker=document.getElementById('caTicker').value.trim().toUpperCase();
+  if(!/^[A-Z0-9]{1,7}$/.test(ticker)){alert('Kode saham harus 1-7 huruf/angka.');return;}
+  const rows=getCAWatch();
+  if(rows.some(x=>x.ticker===ticker)){alert('Saham sudah ada. Hapus dulu jika mau mengganti detail.');return;}
+  if(rows.length>=15){alert('Maksimal 15 saham. Hapus yang tidak dibutuhkan dulu.');return;}
+  const source=document.getElementById('caSource').value.trim();
+  if(source && !/^https:\/\//i.test(source)){alert('Gunakan tautan HTTPS yang valid.');return;}
+  if(source){try{if(new URL(source).protocol!=='https:')throw Error('invalid');}catch(e){alert('Tautan sumber tidak valid.');return;}}
+  rows.push({
+    ticker,type:document.getElementById('caType').value,
+    date:document.getElementById('caDate').value,
+    source,note:document.getElementById('caNote').value.trim().slice(0,250)
+  });
+  if(!saveCAWatch(rows))return;
+  document.getElementById('caTicker').value='';
+  document.getElementById('caSource').value='';
+  document.getElementById('caNote').value='';
+  document.getElementById('caDate').value='';
+  renderCAWatch();
+}
+function removeCAWatch(index) {
+  const rows=getCAWatch();
+  if(index<0||index>=rows.length)return;
+  rows.splice(index,1);
+  if(saveCAWatch(rows))renderCAWatch();
+}
+renderCAWatch();
+
 async function runMoverScan(mode='quick'){
-  const target=document.getElementById('moverResults');
+  const target=document.getElementById(mode==='ca'?'caMoverResults':'moverResults');
   if(!target)return;
+  let tickers=[];
+  if(mode==='ca'){
+    tickers=getCAWatch().map(x=>x.ticker);
+    if(!tickers.length){target.textContent='Tambahkan minimal satu saham dalam daftar pantauan CA dulu.';return;}
+  }
   target.textContent='Memeriksa pergerakan harga Yahoo 5m...';
   try {
-    const response=await fetch(STOCKRADAR_API_BASE+'/api/movers?mode='+encodeURIComponent(mode),{cache:'no-store'});
+    const url=STOCKRADAR_API_BASE+'/api/movers?mode='+encodeURIComponent(mode)
+      +(mode==='ca'?'&tickers='+encodeURIComponent(tickers.join(',')):'');
+    const response=await fetch(url,{cache:'no-store'});
     if(!response.ok)throw new Error('HTTP '+response.status);
     const data=await response.json();
     if(!data.success)throw new Error(data.error||'Data tidak tersedia');

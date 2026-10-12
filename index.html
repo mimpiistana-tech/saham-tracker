@@ -4141,6 +4141,90 @@ async function refreshScannerLivePrices(items){
 // opening a simulated paper position.
 const scannerPaperCandidates = Object.create(null);
 
+const scannerManual5mProofs=Object.create(null);
+
+function parseStockbitVolume(value){
+  const s=String(value??'').trim().toUpperCase().replace(/\s+/g,'');
+  const m=s.match(/^(\d+(?:[.,]\d+)?)([KMB])?$/);
+  if(!m) return NaN;
+  const factor={K:1000,M:1000000,B:1000000000}[m[2]]||1;
+  return Number(m[1].replace(',','.'))*factor;
+}
+function manual5mAssessment(last,average,checks){
+  if(!Number.isFinite(last)||!Number.isFinite(average)||last<=0||average<=0){
+    return {ok:false,ratio:null,status:'WAIT_DATA'};
+  }
+  const ratio=last/average;
+  if(!checks.every(Boolean)||ratio<1.3){
+    return {ok:false,ratio,status:'WAIT_CONFIRMATION'};
+  }
+  return {ok:true,ratio,status:'PAPER_WATCH_MANUAL'};
+}
+function getManual5mValues(ticker){
+  const ids=['closed','green','break','hl'];
+  return {
+    last:parseStockbitVolume(document.getElementById('scanner5mLast_'+ticker)?.value),
+    average:parseStockbitVolume(document.getElementById('scanner5mAvg_'+ticker)?.value),
+    checks:ids.map(id=>Boolean(document.getElementById('scanner5m_'+id+'_'+ticker)?.checked))
+  };
+}
+function invalidateManual5m(ticker){
+  delete scannerManual5mProofs[ticker];
+  const btn=document.getElementById('scanner5mPaperBtn_'+ticker);
+  if(btn) btn.disabled=true;
+  const target=document.getElementById('scanner5mResult_'+ticker);
+  if(target) target.textContent='⏳ Belum valid. Isi volume dan konfirmasi struktur 5m.';
+}
+function verifyManual5m(ticker){
+  invalidateManual5m(ticker);
+  const el=document.getElementById('scanner5mResult_'+ticker);
+  const pending=scannerPaperCandidates[ticker];
+  const price=parseStockbitPrice(document.getElementById('scannerStockbitInput_'+ticker)?.value);
+  if(!pending||Date.now()-pending.savedAt>120000||pending.price!==price){
+    if(el) el.textContent='⏳ Konfirmasi harga Stockbit lagi terlebih dahulu (maksimal 2 menit).';
+    return;
+  }
+  const v=getManual5mValues(ticker);
+  const result=manual5mAssessment(v.last,v.average,v.checks);
+  const ratio=result.ratio==null?'--':result.ratio.toFixed(2)+'×';
+  if(!result.ok){
+    if(el) el.textContent='⏳ '+result.status+' • Volume '+ratio+
+      ' MA20. Perlu candle selesai, hijau, close tembus high sebelumnya, HL, dan volume ≥1,3×.';
+    return;
+  }
+  scannerManual5mProofs[ticker]={
+    price,savedAt:Date.now(),last:v.last,average:v.average,
+    checks:v.checks.join(','),ratio:result.ratio
+  };
+  const btn=document.getElementById('scanner5mPaperBtn_'+ticker);
+  if(btn) btn.disabled=false;
+  if(el) el.textContent='🟢 PAPER WATCH MANUAL: volume '+ratio+
+    ' MA20. Data kamu belum diverifikasi otomatis; hanya simulasi.';
+}
+function scanner5mForm(ticker){
+  if(!/^[A-Z0-9]{1,7}$/.test(ticker)) return '';
+  const flags=[
+    ['closed','Candle 5m selesai'],
+    ['green','Candle hijau (close > open)'],
+    ['break','Close di atas high candle sebelumnya'],
+    ['hl','Higher Low terlihat pada grafik']
+  ];
+  return `
+  <div class="stockbit-confirm" style="margin-top:10px">
+    <div class="stockbit-confirm-title">📊 Volume Stockbit 5m • Manual</div>
+    <div class="small" style="margin:7px 0">Gunakan volume candle 5m yang SUDAH SELESAI dan MA20 volume 5m dalam satuan yang sama. Contoh 83 dan 2.56K.</div>
+    <div class="stockbit-confirm-row">
+      <input id="scanner5mLast_${ticker}" class="stockbit-confirm-input" type="text" inputmode="decimal" placeholder="Vol 5m, mis. 83" oninput="invalidateManual5m('${ticker}')">
+      <input id="scanner5mAvg_${ticker}" class="stockbit-confirm-input" type="text" inputmode="decimal" placeholder="MA20, mis. 2.56K" oninput="invalidateManual5m('${ticker}')">
+    </div>
+    ${flags.map(([id,title])=>`<label class="small" style="display:block;margin:7px 0">
+    <input type="checkbox" id="scanner5m_${id}_${ticker}" onchange="invalidateManual5m('${ticker}')"> ${title}</label>`).join('')}
+    <button class="stockbit-confirm-btn" onclick="verifyManual5m('${ticker}')">✅ Validasi Manual 5m</button>
+    <div id="scanner5mResult_${ticker}" class="small" style="margin:7px 0">WAIT DATA • Belum ada validasi.</div>
+    <button class="stockbit-confirm-btn" id="scanner5mPaperBtn_${ticker}" disabled onclick="recordConfirmedScannerPaper('${ticker}')">🧪 Catat Paper (opsional)</button>
+  </div>`;
+}
+
 function recordConfirmedScannerPaper(ticker){
   const pending = scannerPaperCandidates[ticker];
   const resultEl = document.getElementById('scannerStockbitResult_' + ticker);
@@ -4154,9 +4238,19 @@ function recordConfirmedScannerPaper(ticker){
     delete scannerPaperCandidates[ticker];
     return;
   }
+  const proof=scannerManual5mProofs[ticker];
+  const v=getManual5mValues(ticker);
+  const result=manual5mAssessment(v.last,v.average,v.checks);
+  if(!proof||!result.ok||Date.now()-proof.savedAt>120000||
+     proof.price!==pending.price||proof.last!==v.last||
+     proof.average!==v.average||proof.checks!==v.checks.join(',')){
+    if(resultEl) resultEl.textContent='⏳ Validasi harga/volume 5m lagi sebelum Catat Paper.';
+    invalidateManual5m(ticker);
+    return;
+  }
   if(!window.confirm(
-    'CATAT PAPER TRADE '+ticker+' @ '+compactNumber(pending.price)+'? '+
-    'Ini hanya simulasi. Pastikan sudah ada rebound dan volume yang mendukung.'
+    'CATAT PAPER SIMULASI '+ticker+' @ '+compactNumber(pending.price)+
+    '? Bukti Stockbit MANUAL: volume '+result.ratio.toFixed(2)+'× MA20. Ini bukan BUY real.'
   )) return;
 
   const saved = recordStockbitPaperTrigger(pending.ctx, pending.price, 'MANUAL PAPER CONFIRMED');
@@ -4164,7 +4258,10 @@ function recordConfirmedScannerPaper(ticker){
     resultEl.className = saved?.ok ? 'small green' : 'small red';
     resultEl.textContent = saved?.message || 'Gagal mencatat paper trade.';
   }
-  if(saved?.ok) delete scannerPaperCandidates[ticker];
+  if(saved?.ok){
+    delete scannerPaperCandidates[ticker];
+    invalidateManual5m(ticker);
+  }
 }
 
 async function checkScannerTiming5m(item){
@@ -4295,6 +4392,7 @@ function confirmScannerStockbit(item){
   // Confirm button NEVER records a paper trade.
   // Optional paper OPEN requires its own click and fresh Stockbit confirmation.
   delete scannerPaperCandidates[item.ticker];
+  invalidateManual5m(item.ticker);
   if(level === 'GREEN'){
     label = '🟢 AREA SESUAI • TUNGGU KONFIRMASI';
     note += ' Harga masuk zona, belum otomatis BUY. Pastikan ada pantulan dan volume.';
@@ -4327,9 +4425,7 @@ function confirmScannerStockbit(item){
       'Stockbit ' + compactNumber(price) +
       ' • ' + note +
       (level === 'GREEN'
-        ? '<br><button class="stockbit-confirm-btn" style="margin-top:9px" ' +
-          'onclick="recordConfirmedScannerPaper(\'' + item.ticker + '\')">' +
-          '🧪 Catat Paper (opsional)</button>'
+        ? '<br>📊 Lanjut validasi volume Stockbit manual pada kolom di bawah.'
         : '');
   }
 }

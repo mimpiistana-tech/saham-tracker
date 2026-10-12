@@ -32,6 +32,7 @@ jobs:
       - name: Test Yahoo integration (read-only)
         env:
           PYTHONUNBUFFERED: '1'
+          PYTHONPATH: '.'
         run: python tests/live_scanner_check.py
       - name: Check frontend syntax
         run: |

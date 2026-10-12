@@ -75,3 +75,30 @@ def fetch_ksei_shares():
     if response.status_code != 200:
         raise RuntimeError("KSEI shares HTTP " + str(response.status_code))
     return parse_ksei_shares(response.text)
+
+
+def annotate_reminders(events, equities):
+    """Match candidate 4-letter tokens to registered shares, not to CA type."""
+    if not isinstance(events, list) or not isinstance(equities, dict):
+        raise ValueError("Data validasi saham tidak lengkap")
+    results = []
+    for item in events:
+        if not isinstance(item, dict):
+            continue
+        entry = dict(item)
+        tokens = item.get("candidate_tickers") or []
+        codes = sorted({c for c in tokens if isinstance(c, str)
+                        and re.fullmatch(r"[A-Z]{4}", c)})
+        matches = [{"ticker": code, "issuer": equities[code]} for code in codes if code in equities]
+        entry["verified_equity_codes"] = matches
+        entry["other_unverified_codes"] = [code for code in codes if code not in equities]
+        entry["ticker_directory_checked"] = True
+        entry["ticker_verified"] = bool(
+            len(matches) == 1 and len(codes) == 1 and not item.get("is_multi_instrument_notice")
+        )
+        # Avoid ambiguous parent ticker for multi-instrument recordings.
+        entry["ticker"] = matches[0]["ticker"] if entry["ticker_verified"] else None
+        entry["detail_verified"] = False
+        entry["buy_signal"] = False
+        results.append(entry)
+    return results

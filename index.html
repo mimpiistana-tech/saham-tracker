@@ -3993,8 +3993,9 @@ async function validateCandidateLive(item){
     liveNote,
     source:data.source || 'Yahoo Finance intraday',
     freshness:data.freshness || 'UNKNOWN',
-    executionAllowed:
-      String(data.freshness || 'UNKNOWN').toUpperCase() === 'FRESH',
+    // FRESH is timestamp age, not a licensed real-time Stockbit quote.
+    executionAllowed:false,
+    executionReason:'Konfirmasi harga Stockbit manual wajib sebelum paper entry.',
     priceTime:data.price_time_wib || '',
     priceTs:Number(data.price_ts || 0),
     checkedAt:Number(data.checked_at || 0)
@@ -4022,76 +4023,22 @@ function scannerLiveBadgeClass(status){
 
 
 function scannerPaperAction(live){
-  const freshness =
-  String(live?.freshness || 'UNKNOWN').toUpperCase();
-
-  const status =
-  String(live?.liveStatus || 'UNKNOWN').toUpperCase();
-
-  const isFreshForExecution =
-  freshness === 'FRESH';
-
-  if(!isFreshForExecution){
+  const freshness = String(live?.freshness || 'UNKNOWN').toUpperCase();
+  const status = String(live?.liveStatus || 'UNKNOWN').toUpperCase();
+  if(freshness !== 'FRESH'){
     return {
       className:'yellow',
-      label:'⏳ WAIT DATA FRESH',
-      note:'Execution Gate aktif: harga ' + freshness +
-        '. BUY/paper entry diblokir sampai harga intraday berstatus FRESH.'
+      label:'⏳ DATA YAHOO TERTUNDA',
+      note:'Harga Yahoo hanya indikasi ('+freshness+'). Cek harga Stockbit.'
     };
   }
-
-  if(status === 'WAIT_BREAKOUT'){
-    return {
-      className:'yellow',
-      label:'⏳ TUNGGU BREAKOUT',
-      note:'Belum entry. Monitor sampai harga benar-benar menembus trigger breakout.'
-    };
-  }
-
-  if(status === 'BREAKOUT_ZONE'){
-    return {
-      className:'green',
-      label:'🧪 SIAP PAPER BREAKOUT',
-      note:'Harga sudah di area trigger. Paper monitor boleh diaktifkan; jangan mengejar jauh di atas trigger.'
-    };
-  }
-
   if(status === 'TOO_EXTENDED'){
-    return {
-      className:'red',
-      label:'🚫 JANGAN KEJAR',
-      note:'Harga terlalu jauh dari trigger. Tunggu retest atau setup baru.'
-    };
+    return {className:'red',label:'🚫 JANGAN KEJAR',note:'Harga indikatif jauh dari trigger. Cek Stockbit.'};
   }
-
-  if(status === 'PULLBACK_ZONE'){
-    return {
-      className:'green',
-      label:'🧪 SIAP PAPER BID',
-      note:'Harga sudah masuk area pullback. Paper bid dapat diuji pada level entry.'
-    };
-  }
-
-  if(status === 'NEAR_PULLBACK'){
-    return {
-      className:'green',
-      label:'🧪 PASANG BID PAPER',
-      note:'Harga masih dekat area pullback. Pasang bid paper di level entry dan tunggu tersentuh.'
-    };
-  }
-
-  if(status === 'WAIT_PULLBACK'){
-    return {
-      className:'yellow',
-      label:'⏳ TUNGGU PULLBACK',
-      note:'Harga masih terlalu tinggi dari area entry. Jangan kejar.'
-    };
-  }
-
   return {
     className:'yellow',
-    label:'⏳ TUNGGU',
-    note:'Belum ada trigger entry yang valid.'
+    label:'📱 CEK STOCKBIT',
+    note:'Yahoo FRESH hanya berarti timestamp baru, bukan harga real-time terverifikasi. Masukkan harga Stockbit untuk paper entry.'
   };
 }
 
@@ -4130,17 +4077,17 @@ function renderScannerLiveResult(item, live){
   scannerPaperAction(live);
 
   const priceLabel =
-  ['LIVE','DELAYED'].includes(
+  ['FRESH','DELAYED'].includes(
     String(live.freshness || '').toUpperCase()
   )
-  ? 'Harga sesi'
-  : 'Harga sesi terakhir';
+  ? 'Harga Yahoo indikatif'
+  : 'Harga Yahoo sesi terakhir';
 
   target.innerHTML =
     '<b class="' + badgeClass + '">⚡ ' + status + '</b>' +
     '<br>' + priceLabel + ' ' + compactNumber(live.livePrice) +
     ' • Gap vs entry ' + gap +
-    '<br>Sumber ' + (live.freshness || 'UNKNOWN') +
+    '<br>Status timestamp Yahoo: ' + (live.freshness || 'UNKNOWN') +
     timeText +
     '<br>' + (live.liveNote || '') +
     '<br><b class="' + action.className + '">🎯 ' +
@@ -4425,7 +4372,7 @@ async function addPaperTradesBatch(items){
 
     if(!live?.executionAllowed){
       liveFreshnessBlocked += 1;
-      continue;
+      continue; // Yahoo-only entry blocked
     }
 
     const createdAt =
@@ -4613,9 +4560,7 @@ async function addPaperTrade(item){
 
   if(!live?.executionAllowed){
     alert(
-      'WAIT DATA FRESH: harga masih ' +
-      String(live?.freshness || 'UNKNOWN').toUpperCase() +
-      '. Paper entry diblokir sampai status FRESH.'
+      'Paper otomatis diblokir: harga Yahoo bukan konfirmasi Stockbit. Masukkan harga Stockbit pada kartu saham untuk simulasi entry manual.'
     );
     return;
   }
@@ -9477,7 +9422,7 @@ async function runScanner(mode='quick', force=false){
     const savedTime = useStored ? new Date(stored.savedAt).toLocaleString('id-ID',{timeZone:'Asia/Jakarta'}) + ' WIB' : '';
     const scannerCacheNotice = useStored
       ? '<div class="note">📦 Hasil scan tersimpan (' + savedTime + '). Ini bukan harga live. <button class="refresh" onclick="runScanner(\''+mode+'\',true)">🔄 Perbarui scan</button></div>'
-      : '<div class="note">✅ Scan selesai. Data harian, bukan harga live. Konfirmasi harga Stockbit sebelum keputusan.</div>';
+      : '<div class="note">✅ Scan selesai. Data candle tertutup; Yahoo hanya indikasi. Konfirmasi harga Stockbit sebelum paper entry.</div>';
 
     const marketRegimeInfo =
     data.market_regime || {

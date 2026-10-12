@@ -4432,6 +4432,8 @@ function confirmScannerStockbit(item){
 
 
 async function addPaperTradesBatch(items){
+  alert('V2 Staging: TOP 3 otomatis nonaktif. Validasi harga Stockbit + struktur dan volume 5m secara manual pada tiap saham.');
+  return;
   const candidates =
   Array.isArray(items)
   ? items.slice(0,3)
@@ -4624,6 +4626,8 @@ async function addPaperTradesBatch(items){
 }
 
 async function addPaperTrade(item){
+  alert('V2 Staging: tombol Paper Trade lama nonaktif. Gunakan validasi harga + volume Stockbit manual di Scanner.');
+  return;
   const plan = item.paper_plan || {};
 
   if(!plan.entry){
@@ -9742,6 +9746,7 @@ async function runScanner(mode='quick', force=false){
             </div>
             <button class="stockbit-confirm-btn" style="margin-top:9px" onclick='checkScannerTiming5m(${JSON.stringify(x)})'>📊 Cek Pantulan + Volume 5m</button>
             <div id="scannerTiming5m_${x.ticker}" class="small" style="margin-top:7px;line-height:1.6">Belum ada uji candle 5 menit. Sinyal tetap TUNGGU.</div>
+            ${scanner5mForm(x.ticker)}
           </div>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:9px">
             <button class="refresh"
@@ -9817,6 +9822,7 @@ async function runScanner(mode='quick', force=false){
           <div id="scannerStockbitResult_${x.ticker}" class="small" style="margin-top:7px">
             Masukkan harga terakhir dari Stockbit.
           </div>
+          ${scanner5mForm(x.ticker)}
         </div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:9px">
           <button class="refresh"

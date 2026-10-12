@@ -49,6 +49,7 @@ SCANNER_UNIVERSE = [
     "GIAA", "ASSA", "WEHA", "TMAS", "SMDR", "WINS", "HATM",
     # Media, tourism, lifestyle & newer stories
     "SCMA", "MNCN", "BMTR", "FILM", "RAAM", "RANS", "NAYZ", "PIPA", "RICY", "MEJA",
+    "VIVA", "DOOH", "STRK",
 ]
 
 # V2 Quick Scan hanya memproses 20 saham pilihan agar tidak menunggu full universe.

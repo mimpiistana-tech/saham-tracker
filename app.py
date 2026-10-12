@@ -684,11 +684,22 @@ def build_scanner_reason(item):
 def movers():
     """Movement watch only, Yahoo 5m indicative; never a BUY or paper order."""
     mode = request.args.get("mode", "quick").strip().lower()
-    if mode not in {"quick", "full"}:
-        return jsonify({"success":False,"error":"mode harus quick atau full"}),400
+    if mode not in {"quick", "full", "ca"}:
+        return jsonify({"success":False,"error":"mode harus quick, full atau ca"}),400
+    if mode == "ca":
+        raw = request.args.get("tickers", "")
+        supplied = raw.split(",") if raw else []
+        # Bounded custom ticker list: never permit arbitrary paths or mass requests.
+        if not supplied or len(supplied) > 15:
+            return jsonify({"success":False,"error":"Pantauan CA wajib 1-15 saham."}),400
+        cleaned = [item.strip().upper() for item in supplied]
+        if any(not (1 <= len(t) <= 7 and t.isascii() and t.isalnum()) for t in cleaned):
+            return jsonify({"success":False,"error":"Kode saham CA tidak valid."}),400
+        universe = list(dict.fromkeys(cleaned))
+    else:
+        universe = list(dict.fromkeys(QUICK_SCAN_UNIVERSE if mode=="quick" else SCANNER_UNIVERSE))
     today_wib = (datetime.utcnow()+timedelta(hours=7)).date()
-    universe = list(dict.fromkeys(QUICK_SCAN_UNIVERSE if mode=="quick" else SCANNER_UNIVERSE))
-    key = f"movers_{mode}_{today_wib.isoformat()}"
+    key = f"movers_{mode}_{today_wib.isoformat()}_{','.join(sorted(universe)) if mode == 'ca' else ''}"
     cached, state = cache_get(key,max_age=120)
     if cached and state=="HIT":
         output=jsonify(cached["data"])

@@ -40,6 +40,16 @@ def possible_equity_codes(title):
     return results[:60]
 
 
+def classify_reminder(title):
+    """Conservative label for a KSEI reminder; never infer a new catalyst."""
+    title = str(title or "")
+    if BATCH_RECORDING_RE.search(title) or re.search(r"\brecording\s+date\b", title, re.I):
+        return "RECORD_DATE_REMINDER"
+    if GENERIC_NOTICE_RE.search(title) or re.search(r"pendistribusian", title, re.I):
+        return "DISTRIBUTION_REMINDER"
+    return "GENERAL_REMINDER"
+
+
 class ListItems(HTMLParser):
     def __init__(self):
         super().__init__(convert_charrefs=True)
@@ -129,6 +139,9 @@ def parse_ksei_news(html,now=None,max_age_days=14):
                 "is_multi_instrument_notice":is_batch,
                 "category":("KSEI_RECORD_DATE_BATCH" if is_batch else
                             "KSEI_OPERATIONS" if is_generic else "KSEI_REMINDER"),
+                "notice_kind":classify_reminder(title),
+                "initial_disclosure":False,
+                "ca_details_confirmed":False,
                 "title":title[:600],
                 "published_at":day.isoformat(),"source":"KSEI PUBLIC REMINDER",
                 "url":url,"status":"PENGINGAT_CA_BUKAN_PENGUMUMAN_AWAL",

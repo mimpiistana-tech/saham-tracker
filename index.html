@@ -9418,7 +9418,21 @@ async function runHistoricalReplay(){
   }
 }
 
-async function runScanner(mode='quick'){
+function getScannerStored(mode,date){
+  try{
+    const saved = localStorage.getItem('stockradar_scan_v2_' + mode + '_' + date);
+    const parsed = saved ? JSON.parse(saved) : null;
+    if(!parsed || !parsed.data || !parsed.savedAt) return null;
+    return parsed;
+  }catch(e){return null;}
+}
+function storeScannerResult(mode,date,data){
+  try{
+    localStorage.setItem('stockradar_scan_v2_' + mode + '_' + date,
+      JSON.stringify({data,savedAt:Date.now()}));
+  }catch(e){console.warn('Scanner cache unavailable',e);}
+}
+async function runScanner(mode='quick', force=false){
   mode = mode === 'full' ? 'full' : 'quick';
   const date =
   document
@@ -9437,6 +9451,14 @@ async function runScanner(mode='quick'){
   '<div class="loading">' + (mode === 'quick' ? '⚡ Memindai 20 saham pilihan...' : '🔎 Memindai universe lengkap...') + '</div>';
 
   try{
+    const stored = getScannerStored(mode,date);
+    const nowWib = new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Jakarta'}).format(new Date());
+    const ttl = date === nowWib ? 10*60*1000 : 24*60*60*1000;
+    const useStored = !force && stored && Date.now()-stored.savedAt < ttl;
+    let data;
+    if(useStored){
+      data=stored.data;
+    }else{
     const response =
     await fetch(
       'https://saham-tracker-api.onrender.com/api/scanner?to=' +
@@ -9449,7 +9471,13 @@ async function runScanner(mode='quick'){
       throw new Error('HTTP ' + response.status + ' - ' + txt);
     }
 
-    const data = await response.json();
+    data = await response.json();
+    if(data && data.success) storeScannerResult(mode,date,data);
+    }
+    const savedTime = useStored ? new Date(stored.savedAt).toLocaleString('id-ID',{timeZone:'Asia/Jakarta'}) + ' WIB' : '';
+    const scannerCacheNotice = useStored
+      ? '<div class="note">📦 Hasil scan tersimpan (' + savedTime + '). Ini bukan harga live. <button class="refresh" onclick="runScanner(\''+mode+'\',true)">🔄 Perbarui scan</button></div>'
+      : '<div class="note">✅ Scan selesai. Data harian, bukan harga live. Konfirmasi harga Stockbit sebelum keputusan.</div>';
 
     const marketRegimeInfo =
     data.market_regime || {
@@ -9717,8 +9745,12 @@ async function runScanner(mode='quick'){
     `).join('');
 
     target.innerHTML =
-    (topPicksHtml + html) ||
-    '<div class="note">Belum ada kandidat yang lolos filter.</div>';
+    scannerCacheNotice + ((topPicksHtml + html) ||
+    '<div class="note">Belum ada kandidat yang lolos filter.</div>');
+
+    // Previous fallback preserved as commented reference:
+    /*(topPicksHtml + html) ||
+    '<div class="note">Belum ada kandidat yang lolos filter.</div>';*/
 
     if(topPicks.length){
       refreshScannerLivePrices(topPicks);

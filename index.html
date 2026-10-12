@@ -9698,13 +9698,28 @@ async function loadKSEIBackup(box){
     }
     const safe=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
     const rows=data.events||[];
-    box.innerHTML='<div class="note">⚠️ BEI belum dapat diakses. Sumber cadangan: KSEI (pengingat sekunder, bukan pengumuman awal). Terbaru '+safe(data.latest_publication)
-      +' • '+rows.length+' pengingat kategori CA. Ini bukan sinyal BUY.</div>'
-      +(rows.length?rows.slice(0,20).map(x=>'<div class="status-box" style="margin-top:8px"><b>'+safe(x.ticker||'Kode tidak tersedia')+'</b>'
-       +'<div class="small">'+safe(x.title)+'<br>Publikasi: '+safe(x.published_at)
-       +'<br>Pengingat KSEI; cek pengumuman awal dan harga aktual.</div><a href="'+safe(x.url)
-       +'" target="_blank" rel="noopener noreferrer" style="color:#19e6a2">Sumber KSEI</a></div>').join('')
-       :'<div class="note">Tidak ada pengingat CA yang memenuhi filter dari halaman yang terbaca. Bukan bukti tidak ada CA.</div>');
+    const single=rows.filter(x=>x.ticker && !x.is_multi_instrument_notice);
+    const grouped=rows.filter(x=>x.is_multi_instrument_notice);
+    const other=rows.filter(x=>!x.ticker && !x.is_multi_instrument_notice);
+    const card=x=>{
+      const codes=Array.isArray(x.candidate_tickers)?x.candidate_tickers:[];
+      return '<div class="status-box" style="margin-top:8px"><b>'
+        +safe(x.ticker ? 'Kandidat '+x.ticker+' (belum diverifikasi)'
+          :x.is_multi_instrument_notice ? 'Pengumuman gabungan beberapa efek' : 'Informasi umum KSEI')
+        +'</b><div class="small">'+safe(x.title)
+        +'<br>Publikasi: '+safe(x.published_at)
+        +(codes.length?'<br>Kode 4 huruf yang disebut (BELUM dipastikan saham): '+safe(codes.join(', ')):'')
+        +'<br>WATCH ONLY • BUKAN rekomendasi BUY. Periksa jenis efek dan dokumen resmi.</div>'
+        +'<a href="'+safe(x.url)+'" target="_blank" rel="noopener noreferrer" style="color:#19e6a2">Lihat KSEI</a></div>';
+    };
+    box.innerHTML='<div class="note">⚠️ BEI belum dapat diakses. Data KSEI hanya pengingat sekunder, bukan pengumuman pertama.'
+      +'<br>Publikasi terbaru '+safe(data.latest_publication)+' • '+rows.length+' pengingat.'
+      +'<br>Kandidat emiten tunggal: '+single.length+' • Pengumuman gabungan: '+grouped.length+'.'
+      +'<br>Kode yang tampak BELUM divalidasi sebagai saham BEI.</div>'
+      +(single.length?'<h3>🔎 Kandidat emiten tunggal (perlu verifikasi)</h3>'+single.map(card).join(''):'')
+      +(grouped.length?'<h3>📚 Pengumuman gabungan / kode berbagai jenis efek</h3>'+grouped.slice(0,8).map(card).join(''):'')
+      +(other.length?'<h3>🗂️ Pengingat umum</h3>'+other.slice(0,6).map(card).join(''):'')
+      +(!rows.length?'<div class="note">Belum ada pengingat dalam jendela waktu. Bukan bukti tidak ada CA.</div>':'');
   }catch(e){
     box.textContent='⚠️ WAIT_DATA: BEI dan cadangan KSEI belum dapat diakses. Tidak ada data terverifikasi.';
   }

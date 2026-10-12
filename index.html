@@ -9695,6 +9695,43 @@ async function runScanner(mode='quick', force=false){
       Number(a.score || 0)
     );
 
+    // Indicative entry proximity: use the closed daily signal price, never
+    // pretend this is a current verified Stockbit quote.
+    const entryProximity = item => {
+      const low=Number(item.entry_low||0),high=Number(item.entry_high||0);
+      const signal=Number(item.close||0);
+      if(!(low>0&&high>=low&&signal>0)) return {rank:4,gap:null};
+      if(signal>=low&&signal<=high) return {rank:0,gap:0};
+      if(signal>high) {
+        const gap=100*(signal/high-1);
+        return {rank:gap<=3?1:3,gap};
+      }
+      const gap=100*(low/signal-1);
+      return {rank:gap<=3?2:3,gap:-gap};
+    };
+    const entryShortlist = (eligiblePool.length ? eligiblePool : fallbackPool)
+      .slice().sort((a,b)=>{
+        const aa=entryProximity(a),bb=entryProximity(b);
+        return aa.rank-bb.rank || gatePriority(a.regime_gate_status)-gatePriority(b.regime_gate_status)
+          || Number(b.score||0)-Number(a.score||0);
+      }).slice(0,5);
+    const shortlistHtml = '<div class="note" style="margin-top:12px">'
+      +'<b>🎯 RADAR KANDIDAT ENTRY (INDIKATIF)</b>'
+      +'<div class="small" style="margin-top:5px">Urutan berdasarkan harga SINYAL harian terhadap zona, bukan harga Stockbit live. Wajib verifikasi Stockbit dan candle 5m. Tidak ada BUY otomatis.</div>'
+      +entryShortlist.map(x=>{
+        const p=entryProximity(x);
+        const status=p.rank===0?'DALAM ZONA SINYAL'
+          :p.rank===1?'DEKAT ZONA (DI ATAS)'
+          :p.rank===2?'DEKAT ZONA (DI BAWAH)'
+          :'JAUH / CEK STOCKBIT';
+        return '<div class="status-box" style="margin-top:8px"><b>'+x.ticker
+          +' • Score '+Number(x.score||0).toFixed(1)+'</b>'
+          +'<div class="small">'+status+' • Sinyal '+compactNumber(x.close)
+          +' • Zona '+compactNumber(x.entry_low)+'–'+compactNumber(x.entry_high)
+          +' • Gap '+(p.gap==null?'--':p.gap.toFixed(2)+'%')
+          +'<br>Konfirmasi harga aktual di kartu saham bawah; ini hanya prioritas pengecekan.</div></div>';
+      }).join('')+'</div>';
+
     const topPicks =
     (eligiblePool.length
       ? eligiblePool
@@ -9881,7 +9918,7 @@ async function runScanner(mode='quick', force=false){
     `).join('');
 
     target.innerHTML =
-    scannerCacheNotice + ((topPicksHtml + html) ||
+    scannerCacheNotice + shortlistHtml + ((topPicksHtml + html) ||
     '<div class="note">Belum ada kandidat yang lolos filter.</div>');
 
     if(topPicks.length){

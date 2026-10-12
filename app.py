@@ -5,6 +5,8 @@ import time
 from datetime import datetime, timedelta
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
+from movers import build_mover
+
 from radar_score import (
     score_from_broker_rows,
     score_from_market_data,
@@ -674,6 +676,67 @@ def build_scanner_reason(item):
         action_note = "belum actionable"
 
     return ", ".join(reasons) + "; " + action_note
+
+
+
+@app.route("/api/movers")
+def movers():
+    """Movement watch only, Yahoo 5m indicative; never a BUY or paper order."""
+    mode = request.args.get("mode", "quick").strip().lower()
+    if mode not in {"quick", "full"}:
+        return jsonify({"success":False,"error":"mode harus quick atau full"}),400
+    today_wib = (datetime.utcnow()+timedelta(hours=7)).date()
+    universe = list(dict.fromkeys(QUICK_SCAN_UNIVERSE if mode=="quick" else SCANNER_UNIVERSE))
+    key = f"movers_{mode}_{today_wib.isoformat()}"
+    cached, state = cache_get(key,max_age=120)
+    if cached and state=="HIT":
+        output=jsonify(cached["data"])
+        output.headers["X-StockRadar-Cache"]="HIT"
+        return output
+    now_ts=int(time.time())
+    def fetch_one(ticker):
+        try:
+            response=requests.get(
+                f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker}.JK",
+                params={"period1":now_ts-2*86400,"period2":now_ts+60,"interval":"5m"},
+                headers={"User-Agent":"Mozilla/5.0 StockRadar/2.0","accept":"application/json"},
+                timeout=12,
+            )
+            if response.status_code != 200:
+                return None, "HTTP_"+str(response.status_code)
+            result=((response.json().get("chart") or {}).get("result") or [None])[0]
+            return build_mover(ticker,result,now_ts)
+        except (requests.RequestException,ValueError,TypeError):
+            return None,"SOURCE_ERROR"
+    records=[]
+    failed={}
+    with ThreadPoolExecutor(max_workers=6) as executor:
+        future_map={executor.submit(fetch_one,ticker):ticker for ticker in universe}
+        for future in as_completed(future_map):
+            ticker=future_map[future]
+            try:
+                item,reason=future.result()
+            except Exception:
+                item,reason=None,"SOURCE_ERROR"
+            if item:
+                records.append(item)
+            else:
+                failed[reason or "UNKNOWN"]=failed.get(reason or "UNKNOWN",0)+1
+    records.sort(key=lambda item:item["change_pct"],reverse=True)
+    response_data={
+        "success":True,"mode":mode,"date_wib":today_wib.isoformat(),
+        "source":"Yahoo Finance 5m indicative (not verified real-time IDX)",
+        "universe_size":len(universe),"scanned":len(records),
+        "missing":len(universe)-len(records),"failure_reasons":failed,
+        "market_data_is_live":False,"signal":"WATCH_ONLY",
+        "note":"Pergerakan bukan sinyal BUY. Data dapat tertunda atau tidak tersedia; tidak mencakup seluruh BEI.",
+        "movers":records[:40],"rising":[item for item in records if item["change_pct"]>=1][:30],
+    }
+    cache_put(key,response_data,200)
+    output=jsonify(response_data)
+    output.headers["Cache-Control"]="no-store"
+    output.headers["X-StockRadar-Cache"]="MISS"
+    return output
 
 
 @app.route("/api/scanner")

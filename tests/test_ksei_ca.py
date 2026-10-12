@@ -50,7 +50,7 @@ class KSEICATests(unittest.TestCase):
         with patch.object(app,"fetch_ksei_reminders",return_value={
             "source_url":"https://web.ksei.co.id/ksei_news/browse",
             "fetched_rows":5,"latest_publication":"2026-10-12","events":[],
-        }):
+        }), patch.object(app,"fetch_ksei_shares",return_value={"BBRI":"BANK RAKYAT INDONESIA"}):
             result=app.app.test_client().get("/api/ca-ksei")
         self.assertEqual(result.status_code,200)
         self.assertFalse(result.get_json()["initial_disclosure"])

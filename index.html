@@ -971,6 +971,12 @@ berapa persen mesin yang sudah aktif.
       🔎 Scan Lengkap (lebih lama)
     </button>
     <div class="small" style="margin-top:9px">Scan Cepat hanya 20 saham pilihan, bukan seluruh IDX. Harga perlu dikonfirmasi di Stockbit.</div>
+    <div class="note" style="margin-top:10px">
+      <b>🤖 Auto Paper Watch 5m (simulasi)</b>
+      <div class="small">Cek maksimal tiga kandidat dari scan tersimpan. Data Yahoo indikatif. Tidak mencatat paper OPEN atau mengirim order.</div>
+      <button class="refresh" onclick="runAutoPaperWatch()">🧪 Periksa Sinyal 5m Otomatis</button>
+      <div id="autoPaperWatchStatus" class="small" style="margin-top:7px">Belum diperiksa.</div>
+    </div>
   </div>
 
   <div class="card">
@@ -9561,6 +9567,35 @@ function storeScannerResult(mode,date,data){
     localStorage.setItem('stockradar_scan_v2_' + mode + '_' + date,
       JSON.stringify({data,savedAt:Date.now()}));
   }catch(e){console.warn('Scanner cache unavailable',e);}
+}
+let autoPaperBusy=false;
+async function runAutoPaperWatch(){
+  const box=document.getElementById('autoPaperWatchStatus');
+  if(autoPaperBusy)return;
+  autoPaperBusy=true;
+  try{
+    const date=document.getElementById('dateInput')?.value;
+    const stored=getScannerStored('full',date)||getScannerStored('quick',date);
+    const items=(stored?.data?.results||[]).filter(x=>x.setup!=='Netral')
+      .sort((a,b)=>Number(b.score||0)-Number(a.score||0)).slice(0,3);
+    if(!items.length){if(box)box.textContent='Scan Cepat/Lengkap dahulu, bro.';return;}
+    if(box)box.textContent='⏳ Mengecek tiga kandidat...';
+    const rows=[];
+    for(const item of items){
+      try{
+        const response=await fetch(STOCKRADAR_API_BASE+'/api/entry-timing?ticker='+encodeURIComponent(item.ticker),{cache:'no-store'});
+        const data=await response.json();
+        const price=Number(data.last_completed_close||0),lo=Number(item.entry_low||0),hi=Number(item.entry_high||0);
+        const inZone=lo>0&&hi>=lo&&price>=lo&&price<=hi;
+        const today=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Jakarta',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
+        const sameDay=String(data.bar_end_wib||'').slice(0,10)===today;
+        const ready=response.ok&&data.success&&data.status==='BOUNCE_CONFIRMED'&&inZone&&sameDay;
+        rows.push(item.ticker+' — '+(ready?'PAPER WATCH, cek Stockbit':'TUNGGU ('+(data.status||'WAIT_DATA')+')')+
+          '; Yahoo 5m '+(price?compactNumber(price):'--')+'; zona '+compactNumber(lo)+'–'+compactNumber(hi));
+      }catch(e){rows.push(item.ticker+' — WAIT_DATA (candle 5m tidak tersedia)');}
+    }
+    if(box)box.textContent=rows.join(' | ')+' • 0 paper OPEN. Data Yahoo indikatif.';
+  }finally{autoPaperBusy=false;}
 }
 async function runScanner(mode='quick', force=false){
   mode = mode === 'full' ? 'full' : 'quick';

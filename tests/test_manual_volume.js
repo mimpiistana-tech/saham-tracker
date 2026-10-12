@@ -66,6 +66,9 @@ els.scannerStockbitInput_ARCI.value='1300'; // Changed price
 modules.recordConfirmedScannerPaper('ARCI');
 assert.equal(recorded,0,'Changed price must invalidate entry');
 els.scannerStockbitInput_ARCI.value='1290';
+// A mismatched Stockbit price consumed the previous confirmation.
+// The user must reconfirm the quote before being allowed to paper trade.
+modules.scannerPaperCandidates.ARCI={price:1290,savedAt:Date.now(),ctx:{}};
 modules.verifyManual5m('ARCI');
 modules.recordConfirmedScannerPaper('ARCI');
 assert.equal(recorded,1,'Explicit paper entry should run once after full proof');

@@ -992,6 +992,14 @@ berapa persen mesin yang sudah aktif.
   </div>
 
   <div class="card">
+    <h2>📈 Radar Pergerakan (WATCH)</h2>
+    <div class="note">Memantau kenaikan dan penurunan sesi ini dengan Yahoo 5m indikatif. Tidak seluruh BEI; data bisa tertunda. Pergerakan bukan sinyal beli, tidak melakukan order atau paper OPEN.</div>
+    <button class="refresh" onclick="runMoverScan('quick')">⚡ Pantau Pergerakan 20 Saham</button>
+    <button class="refresh" style="margin-top:8px" onclick="runMoverScan('full')">🔎 Pantau Daftar Luas</button>
+    <div id="moverResults" style="margin-top:10px"><div class="loading">Belum dipindai.</div></div>
+  </div>
+
+  <div class="card">
     <h2>🏆 Hasil Scanner</h2>
     <div class="note" style="border:1px solid #19e6a2;margin:7px 0;padding:9px">🛡️ V2-MANUAL-5M • Konfirmasi cek harga saja. Paper memerlukan cek volume dan struktur 5m manual.</div>
     <div id="scannerResults">
@@ -9642,6 +9650,29 @@ async function runAutoPaperWatch(){
     autoPaperBusy=false;
   }
 }
+async function runMoverScan(mode='quick'){
+  const target=document.getElementById('moverResults');
+  if(!target)return;
+  target.textContent='Memeriksa pergerakan harga Yahoo 5m...';
+  try {
+    const response=await fetch(STOCKRADAR_API_BASE+'/api/movers?mode='+encodeURIComponent(mode),{cache:'no-store'});
+    if(!response.ok)throw new Error('HTTP '+response.status);
+    const data=await response.json();
+    if(!data.success)throw new Error(data.error||'Data tidak tersedia');
+    const htmlSafe=value=>String(value).replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
+    const rows=(data.movers||[]);
+    const rising=rows.filter(x=>x.change_pct>=1);
+    target.innerHTML='<div class="small">Sesi '+htmlSafe(data.date_wib)+' WIB • Terbaca '+data.scanned+'/'+data.universe_size+' • Gagal/kosong '+data.missing+' • Sumber Yahoo indikatif, bukan live IDX.</div>'
+      +(rising.length?'<div class="note">🟢 '+rising.length+' saham naik minimal 1% di hasil pantauan (tidak selalu semua saham tersedia).</div>':'<div class="note">Belum ada saham naik ≥1% dari data sesi saat ini. Jangan menyimpulkan market tidak bergerak jika data kosong/tertunda.</div>')
+      +(rows.length?rows.map(x=>'<div class="status-box" style="margin-top:8px"><b>'+htmlSafe(x.ticker)+' • '+Number(x.change_pct).toFixed(2)+'%</b>'
+       +'<div class="small">Harga Yahoo '+Number(x.price)+' • '+htmlSafe(x.quote_time_wib)+' WIB • '+htmlSafe(x.freshness)+' • Umur '+Math.round(x.age_seconds/60)+' menit'
+       +' • Volume 5m '+(x.volume_ratio_5m==null?'belum cukup':Number(x.volume_ratio_5m).toFixed(2)+'x')
+       +'<br>🔎 WATCH ONLY — konfirmasi di Stockbit. Bukan sinyal BUY.</div></div>').join(''):'<div class="note">Tidak ada data intraday sesi ini yang layak dibandingkan. Cek kembali sumber data.</div>');
+  }catch(error){
+    target.textContent='WAIT_DATA: radar pergerakan belum berhasil. '+error.message+'. Tidak ada sinyal BUY.';
+  }
+}
+
 async function runScanner(mode='quick', force=false){
   mode = mode === 'full' ? 'full' : 'quick';
   const date =

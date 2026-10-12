@@ -668,6 +668,17 @@ def scanner():
             "error": "Format tanggal harus YYYY-MM-DD",
         }), 400
 
+    # Repeated scans should return almost immediately without another 20-150 Yahoo requests.
+    today_wib = (datetime.utcnow() + timedelta(hours=7)).date()
+    selected_date = datetime.strptime(date_to, "%Y-%m-%d").date()
+    ttl = 10 * 60 if selected_date >= today_wib else CACHE_TTL
+    scanner_key = f"scanner_result_{mode}_{date_to}"
+    cached, cache_state = cache_get(scanner_key, max_age=ttl)
+    if cached and cache_state == "HIT":
+        response = jsonify(cached["data"])
+        response.headers["X-StockRadar-Cache"] = "HIT"
+        return response, cached["status"]
+
     results = []
 
     with ThreadPoolExecutor(max_workers=8) as executor:
@@ -741,7 +752,7 @@ def scanner():
         date_to
     )
 
-    return jsonify({
+    result_data = {
         "success": True,
         "date": date_to,
         "source": "Yahoo Finance OHLCV",
@@ -766,7 +777,11 @@ def scanner():
         "top_picks": top_picks,
         "groups": groups,
         "results": actionable[:15],
-    })
+    }
+    cache_put(scanner_key, result_data, 200)
+    response = jsonify(result_data)
+    response.headers["X-StockRadar-Cache"] = "MISS"
+    return response
 
 
 def get_historical_ohlcv(ticker, date_to, calendar_days=1000):

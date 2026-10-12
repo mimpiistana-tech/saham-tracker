@@ -7,6 +7,7 @@ from datetime import date, datetime, timezone, timedelta
 from html.parser import HTMLParser
 from urllib.parse import urljoin, urlparse
 import re
+import time
 import requests
 
 KSEI_URL="https://web.ksei.co.id/ksei_news/browse"
@@ -150,14 +151,24 @@ def parse_ksei_news(html,now=None,max_age_days=14):
     }
 
 def fetch_ksei_reminders():
-    response=requests.get(
-        KSEI_URL,
-        headers={"User-Agent":"Mozilla/5.0 (compatible; StockRadar/2.0; public-CA-monitor)",
-                 "Accept":"text/html"},
-        timeout=15,
-    )
+    # A bounded single retry mitigates intermittent 5xx without hammering KSEI.
+    # Never retry access-denied (403) or try to evade website restrictions.
+    response=None
+    for attempt in range(2):
+        response=requests.get(
+            KSEI_URL,
+            headers={"User-Agent":"Mozilla/5.0 (compatible; StockRadar/2.0; public-CA-monitor)",
+                     "Accept":"text/html"},
+            timeout=12,
+        )
+        if response.status_code in (500, 502, 503, 504) and attempt==0:
+            time.sleep(0.75)
+            continue
+        break
     if response.status_code!=200:
         raise RuntimeError("KSEI HTTP "+str(response.status_code))
+    if "application/json" in response.headers.get("Content-Type","").lower():
+        raise RuntimeError("KSEI mengirim JSON, bukan halaman pengumuman")
     result=parse_ksei_news(response.text)
     if result["fetched_rows"]<1 or result["is_stale"]:
         raise RuntimeError("KSEI NEWS STALE atau format tidak terbaca; "

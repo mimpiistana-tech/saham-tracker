@@ -9740,17 +9740,17 @@ async function loadKSEIBackup(box){
         +'<br>WATCH ONLY: kecocokan kode saham TIDAK membuktikan aksi korporasi tertentu atau peluang BUY.</div>'
         +'<a href="'+safe(x.url)+'" target="_blank" rel="noopener noreferrer" style="color:#19e6a2">Lihat pengingat KSEI</a></div>';
     };
-    box.innerHTML='<div class="note">⚠️ BEI belum dapat diakses. KSEI hanya pengingat sekunder.'
+    box.innerHTML='<div class="note">⚠️ BEI belum dapat diakses. KSEI hanya pengingat sekunder, BUKAN radar pengumuman aksi baru.'
       +'<br>Publikasi terbaru: '+safe(data.latest_publication)+' • '+rows.length+' pengingat.'
       +'<br>Validasi kode saham: '+(registryOK?'DAFTAR SAHAM KSEI TERBACA':'BELUM BERHASIL')
       +' • '+verified.length+' kode saham cocok • '+batches.length+' pengumuman gabungan.'
       +(!registryOK?'<br>⚠️ '+safe(data.equity_directory_error||'Daftar resmi saham belum bisa dibaca')+'. Kode belum dinyatakan valid.':'')
       +'<br>Belum mengidentifikasi pengumuman CA pertama. Bukan sinyal BUY.</div>'
-      +(verified.length?'<h3>✅ Kode saham yang cocok dengan registri resmi</h3>'
-        +'<div class="status-box">'+verified.map(([ticker,issuer])=>'<div>'+safe(ticker)+' — '+safe(issuer)+'</div>').join('')+'</div>':'')
+      +(verified.length?'<details style="margin:10px 0"><summary style="cursor:pointer;padding:12px;background:#112b43;border-radius:10px">📂 '+verified.length+' kode saham disebut dalam pengingat (BUKAN otomatis peluang BUY) — ketuk untuk melihat</summary>'
+        +'<div class="status-box">'+verified.map(([ticker,issuer])=>'<div>'+safe(ticker)+' — '+safe(issuer)+'</div>').join('')+'</div></details>':'')
       +(singles.length?'<h3>🔎 Pengingat dengan satu kode saham</h3>'+singles.slice(0,10).map(card).join(''):'')
-      +(batches.length?'<h3>📚 Pengumuman gabungan</h3>'+batches.slice(0,8).map(card).join(''):'')
-      +(rest.length?'<h3>🗂️ Pengingat lainnya</h3>'+rest.slice(0,6).map(card).join(''):'')
+      +(batches.length?'<details style="margin:10px 0"><summary style="cursor:pointer;padding:12px;background:#112b43;border-radius:10px">📚 '+batches.length+' pengingat gabungan (administratif) — lihat detail</summary>'+batches.slice(0,8).map(card).join('')+'</details>':'')
+      +(rest.length?'<details style="margin:10px 0"><summary style="cursor:pointer;padding:12px;background:#112b43;border-radius:10px">🗂️ '+rest.length+' pengingat lainnya — lihat detail</summary>'+rest.slice(0,6).map(card).join('')+'</details>':'')
       +(!rows.length?'<div class="note">Tidak ada pengingat terbaru yang bisa dibaca. Bukan bukti tidak ada CA.</div>':'');
     keepCAArchive(box.innerHTML);
   }catch(e){

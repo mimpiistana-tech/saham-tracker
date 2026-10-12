@@ -1000,6 +1000,13 @@ berapa persen mesin yang sudah aktif.
   </div>
 
   <div class="card">
+    <h2>🔎 Auto Radar Corporate Action BEI</h2>
+    <div class="note">Mencari judul pengumuman resmi BEI tanpa input kode saham. Hanya daftar pertama pengumuman yang dapat dibaca; bukan pantauan seluruh BEI real-time. Tidak membaca detail dokumen otomatis dan bukan sinyal BUY.</div>
+    <button class="refresh" onclick="loadAutoCA()">📡 Cari Pengumuman CA Otomatis</button>
+    <div id="autoCAResults" style="margin-top:10px"><div class="small">Belum diperiksa. Jika sumber BEI gagal, status akan ditampilkan.</div></div>
+  </div>
+
+  <div class="card">
     <h2>🏢 Corporate Action Watchlist</h2>
     <div class="note">Pantau saham terkait rights issue, merger/akuisisi, dividen, stock split, saham bonus, RUPS, dan aksi lainnya. Daftar ini diisi manual, bukan feed otomatis BEI. Menambahkan ticker bukan bukti aksi korporasi terjadi. Semua tetap WATCH ONLY.</div>
     <label class="small" for="caTicker">Kode saham</label>
@@ -9676,6 +9683,34 @@ async function runAutoPaperWatch(){
     autoPaperBusy=false;
   }
 }
+async function loadAutoCA(){
+  const box=document.getElementById('autoCAResults');
+  if(!box)return;
+  box.textContent='Membaca pengumuman resmi BEI...';
+  try{
+    const response=await fetch(STOCKRADAR_API_BASE+'/api/ca-discovery',{cache:'no-store'});
+    const data=await response.json();
+    if(!response.ok||!data.success){
+      box.textContent='⚠️ SUMBER BELUM TERSEDIA: '+String(data.error||'HTTP '+response.status)
+        +'. Belum bisa menyimpulkan ada/tidak ada corporate action. Periksa pengumuman BEI langsung.';
+      return;
+    }
+    const safe=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    const events=data.events||[];
+    box.innerHTML='<div class="small">IDX • Dibaca '+Number(data.fetched_rows||0)+' pengumuman • Cocok CA '+events.length
+      +' • '+safe(data.fetched_at_utc||'')+' UTC. Judul saja, detail BELUM diverifikasi.</div>'
+      +(events.length?events.slice(0,30).map(x=>'<div class="status-box" style="margin-top:8px">'
+       +'<b>'+safe(x.ticker)+' • '+safe(x.category)+'</b>'
+       +'<div class="small">'+safe(x.title)+'<br>'+safe(x.published_at)
+       +'<br>WATCH ONLY — verifikasi dokumen sebelum keputusan trading</div>'
+       +'<a href="'+safe(x.url)+'" target="_blank" rel="noopener noreferrer" style="color:#19e6a2">Lihat sumber BEI</a>'
+       +'</div>').join('')
+       :'<div class="note">Tidak ditemukan judul kategori CA pada halaman yang berhasil dibaca. Ini BUKAN bukti tidak ada aksi korporasi.</div>');
+  }catch(e){
+    box.textContent='⚠️ WAIT_DATA: gagal menghubungi sumber resmi. Tidak bisa memastikan corporate action terkini.';
+  }
+}
+
 const CA_WATCH_KEY = 'stockradar-v2-ca-watchlist-v1';
 const CA_TYPE_LABELS = {
   RIGHTS_ISSUE:'Rights Issue',MERGER_AKUISISI:'Merger / Akuisisi',

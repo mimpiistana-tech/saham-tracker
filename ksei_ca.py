@@ -19,6 +19,26 @@ MONTHS={
 DATE_RE=re.compile(r"\b(\d{1,2})\s+([A-Za-z]+)\s+(\d{4})\b")
 TITLE_RE=re.compile(r"(?:Reminder\s+(?:Corporate Action|CA)|Corporate Action)",re.I)
 
+# A recording-date notice can list shares, bonds, warrants and government paper.
+# Standalone four-letter tokens are only *possible* listed equity tickers.
+# Never infer a ticker from the first four letters of a bond identifier.
+BATCH_RECORDING_RE=re.compile(r"Reminder\s+Corporate\s+Action\s+Recording\s+Date",re.I)
+GENERIC_NOTICE_RE=re.compile(r"Reminder\s+CA\.\s+Pendistribusian",re.I)
+STOCK_CODE_RE=re.compile(r"(?<![A-Za-z0-9])[A-Z]{4}(?![A-Za-z0-9])")
+NON_TICKER_WORDS={"DATE","KSEI","CASH","INFO","BEGI","HARI","AKSI","HAKJ"}
+
+def possible_equity_codes(title):
+    """Exact 4-letter words after the colon; never certify them as equities."""
+    if not isinstance(title,str) or ":" not in title:
+        return []
+    tail=title.split(":",1)[1]
+    results=[]
+    for code in STOCK_CODE_RE.findall(tail):
+        if code not in NON_TICKER_WORDS and code not in results:
+            results.append(code)
+    return results[:60]
+
+
 class ListItems(HTMLParser):
     def __init__(self):
         super().__init__(convert_charrefs=True)
@@ -95,21 +115,38 @@ def parse_ksei_news(html,now=None,max_age_days=14):
             if key in unique:
                 continue
             unique.add(key)
-            match=re.search(r":\s*([A-Z]{4})\s*$",title)
+            candidates=possible_equity_codes(title)
+            is_batch=bool(BATCH_RECORDING_RE.search(title))
+            is_generic=bool(GENERIC_NOTICE_RE.search(title))
+            # Single-code titles are suggestions only; no evidence of share class
+            # or action specifics without opening the original announcement.
+            one_code=candidates[0] if len(candidates)==1 and not is_batch else None
             events.append({
-                "ticker":match.group(1) if match else None,
-                "category":"KSEI_REMINDER","title":title[:250],
+                "ticker":one_code,
+                "candidate_tickers":candidates,
+                "ticker_verified":False,
+                "is_multi_instrument_notice":is_batch,
+                "category":("KSEI_RECORD_DATE_BATCH" if is_batch else
+                            "KSEI_OPERATIONS" if is_generic else "KSEI_REMINDER"),
+                "title":title[:600],
                 "published_at":day.isoformat(),"source":"KSEI PUBLIC REMINDER",
                 "url":url,"status":"PENGINGAT_CA_BUKAN_PENGUMUMAN_AWAL",
                 "detail_verified":False,"buy_signal":False,
             })
     newest=max(seen_dates) if seen_dates else None
+    events=sorted(events,key=lambda x:x["published_at"],reverse=True)[:30]
+    candidate_tickers=sorted({
+        ticker for item in events for ticker in item["candidate_tickers"]
+    })
     return {
-        "events":sorted(events,key=lambda x:x["published_at"],reverse=True)[:30],
+        "events":events,
+        "possible_equity_codes":candidate_tickers,
+        "possible_equity_count":len(candidate_tickers),
         "fetched_rows":len(parser.items),
         "latest_publication":newest.isoformat() if newest else None,
         "source_url":KSEI_URL,
         "is_stale":not newest or (today-newest).days>max_age_days,
+        "coverage_note":"Kode 4 huruf hanya kandidat dari pengingat, belum validasi saham BEI.",
     }
 
 def fetch_ksei_reminders():

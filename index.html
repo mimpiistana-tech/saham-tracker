@@ -973,7 +973,7 @@ berapa persen mesin yang sudah aktif.
     <div class="small" style="margin-top:9px">Scan Cepat hanya 20 saham pilihan, bukan seluruh IDX. Harga perlu dikonfirmasi di Stockbit.</div>
     <div class="note" style="margin-top:10px">
       <b>🤖 Auto Paper Watch 5m (simulasi)</b>
-      <div class="small">Cek maksimal tiga kandidat dari scan tersimpan. Data Yahoo indikatif. Tidak mencatat paper OPEN atau mengirim order.</div>
+      <div class="small">Prioritas: sinyal harian paling dekat zona entry, baru skor. Memeriksa maksimal 3 saham lewat Yahoo 5m. Bukan harga live Stockbit dan tidak mencatat paper OPEN ataupun order.</div>
       <button class="refresh" onclick="runAutoPaperWatch()">🧪 Periksa Sinyal 5m Otomatis</button>
       <div id="autoPaperWatchStatus" class="small" style="margin-top:7px">Belum diperiksa.</div>
     </div>
@@ -9568,6 +9568,27 @@ function storeScannerResult(mode,date,data){
       JSON.stringify({data,savedAt:Date.now()}));
   }catch(e){console.warn('Scanner cache unavailable',e);}
 }
+// Auto Paper Watch is read-only. A daily signal selects which ticker to CHECK,
+// never which ticker to buy. The 5m feed is Yahoo indicative, not Stockbit.
+function autoPaperCandidateRank(item){
+  const low=Number(item?.entry_low||0), high=Number(item?.entry_high||0);
+  const signal=Number(item?.close||0);
+  if(!(signal>0&&low>0&&high>=low))return {group:9,gap:Infinity};
+  if(signal>=low&&signal<=high)return {group:0,gap:0};
+  const above=signal>high;
+  const gap=above?(signal/high-1)*100:(low/signal-1)*100;
+  return {group:gap<=3?(above?1:2):3,gap};
+}
+function autoPaperSelectCandidates(results){
+  return (Array.isArray(results)?results:[])
+    .filter(x=>x&&x.setup!=='Netral'&&Number(x.score||0)>=60
+      &&autoPaperCandidateRank(x).group<9)
+    .sort((a,b)=>{
+      const aa=autoPaperCandidateRank(a),bb=autoPaperCandidateRank(b);
+      return aa.group-bb.group||aa.gap-bb.gap||
+        Number(b.score||0)-Number(a.score||0);
+    }).slice(0,3);
+}
 let autoPaperBusy=false;
 async function runAutoPaperWatch(){
   const box=document.getElementById('autoPaperWatchStatus');
@@ -9575,27 +9596,51 @@ async function runAutoPaperWatch(){
   autoPaperBusy=true;
   try{
     const date=document.getElementById('dateInput')?.value;
-    const stored=getScannerStored('full',date)||getScannerStored('quick',date);
-    const items=(stored?.data?.results||[]).filter(x=>x.setup!=='Netral')
-      .sort((a,b)=>Number(b.score||0)-Number(a.score||0)).slice(0,3);
-    if(!items.length){if(box)box.textContent='Scan Cepat/Lengkap dahulu, bro.';return;}
-    if(box)box.textContent='⏳ Mengecek tiga kandidat...';
+    const full=getScannerStored('full',date), quick=getScannerStored('quick',date);
+    const stored=(full?.savedAt||0)>=(quick?.savedAt||0)?full:quick;
+    const items=autoPaperSelectCandidates(stored?.data?.results);
+    if(!items.length){
+      if(box)box.textContent='Belum ada kandidat. Scan Cepat atau Lengkap dahulu.';
+      return;
+    }
+    if(box)box.textContent='⏳ Memeriksa tiga kandidat berdasarkan zona sinyal harian, bukan harga live...';
     const rows=[];
     for(const item of items){
       try{
-        const response=await fetch(STOCKRADAR_API_BASE+'/api/entry-timing?ticker='+encodeURIComponent(item.ticker),{cache:'no-store'});
+        const response=await fetch(STOCKRADAR_API_BASE+
+          '/api/entry-timing?ticker='+encodeURIComponent(item.ticker),{cache:'no-store'});
         const data=await response.json();
-        const price=Number(data.last_completed_close||0),lo=Number(item.entry_low||0),hi=Number(item.entry_high||0);
-        const inZone=lo>0&&hi>=lo&&price>=lo&&price<=hi;
-        const today=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Jakarta',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
-        const sameDay=String(data.bar_end_wib||'').slice(0,10)===today;
-        const ready=response.ok&&data.success&&data.status==='BOUNCE_CONFIRMED'&&inZone&&sameDay;
-        rows.push(item.ticker+' — '+(ready?'PAPER WATCH, cek Stockbit':'TUNGGU ('+(data.status||'WAIT_DATA')+')')+
-          '; Yahoo 5m '+(price?compactNumber(price):'--')+'; zona '+compactNumber(lo)+'–'+compactNumber(hi));
-      }catch(e){rows.push(item.ticker+' — WAIT_DATA (candle 5m tidak tersedia)');}
+        const close=Number(data.last_completed_close||0);
+        const lo=Number(item.entry_low||0),hi=Number(item.entry_high||0);
+        const inZone=lo>0&&hi>=lo&&close>=lo&&close<=hi;
+        const wibToday=new Intl.DateTimeFormat('en-CA',{
+          timeZone:'Asia/Jakarta',year:'numeric',month:'2-digit',day:'2-digit'
+        }).format(new Date());
+        const sameDay=String(data.bar_end_wib||'').slice(0,10)===wibToday;
+        const confirmed=response.ok&&data.success&&data.status==='BOUNCE_CONFIRMED'
+          &&sameDay&&inZone&&data.live_trade_allowed===false;
+        let status=confirmed?'🟡 PAPER WATCH (verifikasi Stockbit)':
+          '⏳ '+String(data.status||'WAIT_DATA');
+        if(!response.ok||!data.success)status='⏳ WAIT_DATA';
+        const reason=confirmed
+          ?'Bar Yahoo selesai dan syarat indikatif lolos, BELUM entry'
+          :String(data.reason||data.error||'Sinyal 5m belum lengkap');
+        const count=Number(data.candle_count||0);
+        rows.push(item.ticker+' — '+status+' • '+reason+
+          ' • '+count+' candle selesai'+
+          (close>0?' • close Yahoo '+compactNumber(close):'')+
+          ' • zona '+compactNumber(lo)+'–'+compactNumber(hi));
+      }catch(e){
+        rows.push(item.ticker+' — WAIT_DATA: gagal mengambil atau membaca data Yahoo 5m');
+      }
     }
-    if(box)box.textContent=rows.join(' | ')+' • 0 paper OPEN. Data Yahoo indikatif.';
-  }finally{autoPaperBusy=false;}
+    if(box)box.textContent=rows.join(' | ')+
+      ' • 0 paper OPEN. Konfirmasi harga dan volume asli di Stockbit.';
+  }catch(e){
+    if(box)box.textContent='WAIT_DATA: pemindaian belum berhasil. Tidak ada paper OPEN.';
+  }finally{
+    autoPaperBusy=false;
+  }
 }
 async function runScanner(mode='quick', force=false){
   mode = mode === 'full' ? 'full' : 'quick';

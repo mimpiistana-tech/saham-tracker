@@ -35,6 +35,18 @@ class TimingTest(unittest.TestCase):
         self.assertEqual(d["status"],"WAIT_CONFIRMATION")
         self.assertFalse(d["checks"]["volume_min_1_3x"])
 
+    def test_zero_latest_volume_is_wait_data(self):
+        zero=row(9,55,102,105,101,104,0)
+        d=radar.analyze_5m_bounce(self.base+[self.prev,zero],ts(10,2))
+        self.assertEqual(d["status"],"WAIT_DATA")
+        self.assertIsNone(d["volume_ratio"])
+        self.assertFalse(d["live_trade_allowed"])
+
+    def test_zero_reference_volume_is_wait_data(self):
+        zero_base=[{**x,"volume":0} for x in self.base]
+        d=radar.analyze_5m_bounce(zero_base+[self.prev,self.bounce],ts(10,2))
+        self.assertEqual(d["status"],"WAIT_DATA")
+
     def test_last_session_data_rejected(self):
         rows=[{**x,"timestamp":x["timestamp"]-86400} for x in self.base+[self.prev,self.bounce]]
         d=radar.analyze_5m_bounce(rows,ts(10,2))

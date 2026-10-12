@@ -269,6 +269,17 @@ button.refresh{
   font-size:14px;
 }
 
+/* Scanner paper entry is intentionally unavailable without the
+   separate manual Stockbit validation. Make this unmistakable on phones. */
+button.refresh.scanner-paper-locked:disabled{
+  background:#344657;
+  color:#b9c5d1;
+  border:1px solid #596a7b;
+  box-shadow:none;
+  opacity:1;
+  cursor:not-allowed;
+}
+
 table{
   width:100%;
   border-collapse:collapse;
@@ -476,6 +487,15 @@ td{
   font-weight:900;
 }
 
+.stockbit-confirm-btn:disabled{
+  background:#334457;
+  color:#a4b1bf;
+  border:1px solid #4d5d70;
+  opacity:1;
+  cursor:not-allowed;
+  box-shadow:none;
+}
+.stockbit-confirm-btn:not(:disabled){cursor:pointer;}
 .stockbit-confirm-result{
   margin-top:8px;
   padding:9px 10px;
@@ -944,9 +964,19 @@ berapa persen mesin yang sudah aktif.
     <div class="note">
       Mesin menyapu kandidat saham otomatis dari data trend, volume, dan risk. Broker summary tidak dipakai saat scan awal agar kuota IndexAlpha tetap hemat.
     </div>
-    <button class="refresh" onclick="runScanner()">
-      🔎 Cari Kandidat Hari Ini
+    <button class="refresh" onclick="runScanner('quick')">
+      ⚡ Scan Cepat (20 saham)
     </button>
+    <button class="refresh" style="margin-top:8px" onclick="runScanner('full')">
+      🔎 Scan Lengkap (lebih lama)
+    </button>
+    <div class="small" style="margin-top:9px">Scan Cepat hanya 20 saham pilihan, bukan seluruh IDX. Harga perlu dikonfirmasi di Stockbit.</div>
+    <div class="note" style="margin-top:10px">
+      <b>🤖 Auto Paper Watch 5m (simulasi)</b>
+      <div class="small">Prioritas: sinyal harian paling dekat zona entry, baru skor. Memeriksa maksimal 3 saham lewat Yahoo 5m. Bukan harga live Stockbit dan tidak mencatat paper OPEN ataupun order.</div>
+      <button class="refresh" onclick="runAutoPaperWatch()">🧪 Periksa Sinyal 5m Otomatis</button>
+      <div id="autoPaperWatchStatus" class="small" style="margin-top:7px">Belum diperiksa.</div>
+    </div>
   </div>
 
   <div class="card">
@@ -962,7 +992,50 @@ berapa persen mesin yang sudah aktif.
   </div>
 
   <div class="card">
+    <h2>📈 Radar Pergerakan (WATCH)</h2>
+    <div class="note">Memantau kenaikan dan penurunan sesi ini dengan Yahoo 5m indikatif. Tidak seluruh BEI; data bisa tertunda. Pergerakan bukan sinyal beli, tidak melakukan order atau paper OPEN.</div>
+    <button class="refresh" onclick="runMoverScan('quick')">⚡ Pantau Pergerakan 20 Saham</button>
+    <button class="refresh" style="margin-top:8px" onclick="runMoverScan('full')">🔎 Pantau Daftar Luas</button>
+    <div id="moverResults" style="margin-top:10px"><div class="loading">Belum dipindai.</div></div>
+  </div>
+
+  <div class="card">
+    <h2>🔎 Auto Radar Corporate Action BEI</h2>
+    <div class="small">Otomatis memeriksa saat menu Scanner dibuka dan tiap 15 menit selama aplikasi terbuka di menu ini. Bukan notifikasi saat aplikasi ditutup.</div>
+    <div class="note">Mencari judul pengumuman resmi BEI tanpa input kode saham. Hanya daftar pertama pengumuman yang dapat dibaca; bukan pantauan seluruh BEI real-time. Tidak membaca detail dokumen otomatis dan bukan sinyal BUY.</div>
+    <button class="refresh" onclick="loadAutoCA()">📡 Cari Pengumuman CA Otomatis</button>
+    <div id="autoCAResults" style="margin-top:10px"><div class="small">Belum diperiksa. Jika sumber BEI gagal, status akan ditampilkan.</div></div>
+  </div>
+
+  <div class="card">
+    <h2>🏢 Corporate Action Watchlist</h2>
+    <div class="note">Pantau saham terkait rights issue, merger/akuisisi, dividen, stock split, saham bonus, RUPS, dan aksi lainnya. Daftar ini diisi manual, bukan feed otomatis BEI. Menambahkan ticker bukan bukti aksi korporasi terjadi. Semua tetap WATCH ONLY.</div>
+    <label class="small" for="caTicker">Kode saham</label>
+    <input id="caTicker" maxlength="7" placeholder="Contoh: NAYZ" style="width:100%;margin-top:6px;padding:11px;border-radius:10px;border:1px solid #193c59;background:#071827;color:#edf6ff;box-sizing:border-box;text-transform:uppercase">
+    <label class="small" for="caType" style="display:block;margin-top:10px">Jenis aksi yang ingin dipantau</label>
+    <select id="caType" style="width:100%;margin-top:6px;padding:11px;border-radius:10px;border:1px solid #193c59;background:#071827;color:#edf6ff">
+      <option value="RIGHTS_ISSUE">Rights Issue</option><option value="MERGER_AKUISISI">Merger / Akuisisi</option>
+      <option value="BACKDOOR">Dugaan Backdoor Listing</option><option value="DIVIDEN">Dividen</option>
+      <option value="STOCK_SPLIT">Stock Split / Reverse Split</option><option value="SAHAM_BONUS">Saham Bonus</option>
+      <option value="RUPS">RUPS / RUPSLB</option><option value="LAINNYA">Lainnya / Belum Diketahui</option>
+    </select>
+    <label class="small" for="caDate" style="display:block;margin-top:10px">Tanggal agenda (opsional, bila ada)</label>
+    <input id="caDate" type="date" style="width:100%;margin-top:6px;padding:11px;border-radius:10px;border:1px solid #193c59;background:#071827;color:#edf6ff;box-sizing:border-box">
+    <label class="small" for="caSource" style="display:block;margin-top:10px">Tautan pengumuman/sumber (opsional)</label>
+    <input id="caSource" type="url" placeholder="https://..." style="width:100%;margin-top:6px;padding:11px;border-radius:10px;border:1px solid #193c59;background:#071827;color:#edf6ff;box-sizing:border-box">
+    <label class="small" for="caNote" style="display:block;margin-top:10px">Catatan / alasan pantauan (opsional)</label>
+    <input id="caNote" maxlength="250" placeholder="Catat informasi yang perlu dicek..." style="width:100%;margin-top:6px;padding:11px;border-radius:10px;border:1px solid #193c59;background:#071827;color:#edf6ff;box-sizing:border-box">
+    <button class="refresh" style="margin-top:10px" onclick="addCAWatch()">➕ Tambah Pantauan CA</button>
+    <button class="refresh" style="margin-top:8px" onclick="runMoverScan('ca')">📈 Cek Pergerakan Saham CA</button>
+    <div class="small" style="margin-top:8px">Maksimal 15 kode saham. Daftar tersimpan hanya di browser/perangkat ini, tidak tersinkron ke akun lain.</div>
+    <div class="small" style="margin-top:8px">Periksa dokumen emiten langsung di <a href="https://idx.co.id/id/perusahaan-tercatat/profil-perusahaan-tercatat" target="_blank" rel="noopener noreferrer" style="color:#19e6a2">situs resmi BEI</a>. Status verifikasi di bawah bukan hasil pengecekan otomatis.</div>
+    <div id="caWatchResults" style="margin-top:10px"><div class="loading">Belum ada pantauan CA.</div></div>
+    <div id="caMoverResults" style="margin-top:10px"><div class="small">Belum ada pengecekan harga ticker CA.</div></div>
+  </div>
+
+  <div class="card">
     <h2>🏆 Hasil Scanner</h2>
+    <div class="note" style="border:1px solid #19e6a2;margin:7px 0;padding:9px">🛡️ V2-MANUAL-5M • Konfirmasi cek harga saja. Paper memerlukan cek volume dan struktur 5m manual.</div>
     <div id="scannerResults">
       <div class="loading">Belum discan.</div>
     </div>
@@ -1559,6 +1632,13 @@ Paper
 
 
 <script>
+const STOCKRADAR_BUILD = 'V2-SAFE-1052';
+const STOCKRADAR_API_BASE =
+  (window.location.hostname.endsWith('.onrender.com')
+    ? window.location.origin
+    : 'https://saham-tracker-api.onrender.com');
+// The V2 staging Render service uses its own API; GitHub Pages stays on production.
+
 
 function openBottomNav(id,btn){
   const section =
@@ -1593,6 +1673,9 @@ function openBottomNav(id,btn){
 
   if(id === 'paper'){
     renderPaperTrades();
+  }
+  if(id === 'scanner'){
+    loadAutoCA(false);  // auto-check on opening Scanner, if not recently checked
   }
 
   window.scrollTo({
@@ -3905,7 +3988,7 @@ async function validateCandidateLive(item){
   }
 
   const url =
-  'https://saham-tracker-api.onrender.com/api/live-quote?ticker=' +
+  STOCKRADAR_API_BASE + '/api/live-quote?ticker=' +
   encodeURIComponent(item.ticker);
 
   const response =
@@ -3989,8 +4072,9 @@ async function validateCandidateLive(item){
     liveNote,
     source:data.source || 'Yahoo Finance intraday',
     freshness:data.freshness || 'UNKNOWN',
-    executionAllowed:
-      String(data.freshness || 'UNKNOWN').toUpperCase() === 'FRESH',
+    // FRESH is timestamp age, not a licensed real-time Stockbit quote.
+    executionAllowed:false,
+    executionReason:'Konfirmasi harga Stockbit manual wajib sebelum paper entry.',
     priceTime:data.price_time_wib || '',
     priceTs:Number(data.price_ts || 0),
     checkedAt:Number(data.checked_at || 0)
@@ -4018,76 +4102,22 @@ function scannerLiveBadgeClass(status){
 
 
 function scannerPaperAction(live){
-  const freshness =
-  String(live?.freshness || 'UNKNOWN').toUpperCase();
-
-  const status =
-  String(live?.liveStatus || 'UNKNOWN').toUpperCase();
-
-  const isFreshForExecution =
-  freshness === 'FRESH';
-
-  if(!isFreshForExecution){
+  const freshness = String(live?.freshness || 'UNKNOWN').toUpperCase();
+  const status = String(live?.liveStatus || 'UNKNOWN').toUpperCase();
+  if(freshness !== 'FRESH'){
     return {
       className:'yellow',
-      label:'⏳ WAIT DATA FRESH',
-      note:'Execution Gate aktif: harga ' + freshness +
-        '. BUY/paper entry diblokir sampai harga intraday berstatus FRESH.'
+      label:'⏳ DATA YAHOO TERTUNDA',
+      note:'Harga Yahoo hanya indikasi ('+freshness+'). Cek harga Stockbit.'
     };
   }
-
-  if(status === 'WAIT_BREAKOUT'){
-    return {
-      className:'yellow',
-      label:'⏳ TUNGGU BREAKOUT',
-      note:'Belum entry. Monitor sampai harga benar-benar menembus trigger breakout.'
-    };
-  }
-
-  if(status === 'BREAKOUT_ZONE'){
-    return {
-      className:'green',
-      label:'🧪 SIAP PAPER BREAKOUT',
-      note:'Harga sudah di area trigger. Paper monitor boleh diaktifkan; jangan mengejar jauh di atas trigger.'
-    };
-  }
-
   if(status === 'TOO_EXTENDED'){
-    return {
-      className:'red',
-      label:'🚫 JANGAN KEJAR',
-      note:'Harga terlalu jauh dari trigger. Tunggu retest atau setup baru.'
-    };
+    return {className:'red',label:'🚫 JANGAN KEJAR',note:'Harga indikatif jauh dari trigger. Cek Stockbit.'};
   }
-
-  if(status === 'PULLBACK_ZONE'){
-    return {
-      className:'green',
-      label:'🧪 SIAP PAPER BID',
-      note:'Harga sudah masuk area pullback. Paper bid dapat diuji pada level entry.'
-    };
-  }
-
-  if(status === 'NEAR_PULLBACK'){
-    return {
-      className:'green',
-      label:'🧪 PASANG BID PAPER',
-      note:'Harga masih dekat area pullback. Pasang bid paper di level entry dan tunggu tersentuh.'
-    };
-  }
-
-  if(status === 'WAIT_PULLBACK'){
-    return {
-      className:'yellow',
-      label:'⏳ TUNGGU PULLBACK',
-      note:'Harga masih terlalu tinggi dari area entry. Jangan kejar.'
-    };
-  }
-
   return {
     className:'yellow',
-    label:'⏳ TUNGGU',
-    note:'Belum ada trigger entry yang valid.'
+    label:'📱 CEK STOCKBIT',
+    note:'Yahoo FRESH hanya berarti timestamp baru, bukan harga real-time terverifikasi. Masukkan harga Stockbit untuk paper entry.'
   };
 }
 
@@ -4126,17 +4156,17 @@ function renderScannerLiveResult(item, live){
   scannerPaperAction(live);
 
   const priceLabel =
-  ['LIVE','DELAYED'].includes(
+  ['FRESH','DELAYED'].includes(
     String(live.freshness || '').toUpperCase()
   )
-  ? 'Harga sesi'
-  : 'Harga sesi terakhir';
+  ? 'Harga Yahoo indikatif'
+  : 'Harga Yahoo sesi terakhir';
 
   target.innerHTML =
     '<b class="' + badgeClass + '">⚡ ' + status + '</b>' +
     '<br>' + priceLabel + ' ' + compactNumber(live.livePrice) +
     ' • Gap vs entry ' + gap +
-    '<br>Sumber ' + (live.freshness || 'UNKNOWN') +
+    '<br>Status timestamp Yahoo: ' + (live.freshness || 'UNKNOWN') +
     timeText +
     '<br>' + (live.liveNote || '') +
     '<br><b class="' + action.className + '">🎯 ' +
@@ -4176,6 +4206,178 @@ async function refreshScannerLivePrices(items){
       }
     })
   );
+}
+
+// Price confirmation is read-only. Explicit separate action is required for
+// opening a simulated paper position.
+const scannerPaperCandidates = Object.create(null);
+
+const scannerManual5mProofs=Object.create(null);
+
+function parseStockbitVolume(value){
+  const s=String(value??'').trim().toUpperCase().replace(/\s+/g,'');
+  const m=s.match(/^(\d+(?:[.,]\d+)?)([KMB])?$/);
+  if(!m) return NaN;
+  const factor={K:1000,M:1000000,B:1000000000}[m[2]]||1;
+  return Number(m[1].replace(',','.'))*factor;
+}
+function manual5mAssessment(last,average,checks){
+  if(!Number.isFinite(last)||!Number.isFinite(average)||last<=0||average<=0){
+    return {ok:false,ratio:null,status:'WAIT_DATA'};
+  }
+  const ratio=last/average;
+  if(!Array.isArray(checks)||checks.length!==4||!checks.every(Boolean)||ratio<1.3){
+    return {ok:false,ratio,status:'WAIT_CONFIRMATION'};
+  }
+  return {ok:true,ratio,status:'PAPER_WATCH_MANUAL'};
+}
+function getManual5mValues(ticker){
+  const ids=['closed','green','break','hl'];
+  return {
+    last:parseStockbitVolume(document.getElementById('scanner5mLast_'+ticker)?.value),
+    average:parseStockbitVolume(document.getElementById('scanner5mAvg_'+ticker)?.value),
+    checks:ids.map(id=>Boolean(document.getElementById('scanner5m_'+id+'_'+ticker)?.checked))
+  };
+}
+function invalidateManual5m(ticker){
+  delete scannerManual5mProofs[ticker];
+  const btn=document.getElementById('scanner5mPaperBtn_'+ticker);
+  if(btn){btn.disabled=true;btn.textContent='🔒 Catat Paper — belum valid';}
+  const target=document.getElementById('scanner5mResult_'+ticker);
+  if(target){
+    const v=getManual5mValues(ticker);
+    if(Number.isFinite(v.last)&&v.last>0&&Number.isFinite(v.average)&&v.average>0){
+      const ratio=v.last/v.average;
+      target.textContent=ratio<1.3
+        ? '⏳ TUNGGU • Volume '+ratio.toFixed(2)+'× MA20 (minimal 1,30×). Jangan catat paper.'
+        : '📊 Volume '+ratio.toFixed(2)+'× MA20 cukup secara angka. Pastikan candle 5m selesai dan seluruh struktur valid sebelum paper.';
+    }else{
+      target.textContent='⏳ Belum valid. Isi volume candle selesai dan MA20 volume 5m Stockbit.';
+    }
+  }
+}
+function verifyManual5m(ticker){
+  invalidateManual5m(ticker);
+  const el=document.getElementById('scanner5mResult_'+ticker);
+  const pending=scannerPaperCandidates[ticker];
+  const price=parseStockbitPrice(document.getElementById('scannerStockbitInput_'+ticker)?.value);
+  if(!pending||Date.now()-pending.savedAt>120000||pending.price!==price){
+    if(el) el.textContent='⏳ Konfirmasi harga Stockbit lagi terlebih dahulu (maksimal 2 menit).';
+    return;
+  }
+  const v=getManual5mValues(ticker);
+  const result=manual5mAssessment(v.last,v.average,v.checks);
+  const ratio=result.ratio==null?'--':result.ratio.toFixed(2)+'×';
+  if(!result.ok){
+    if(el) el.textContent='⏳ '+result.status+' • Volume '+ratio+
+      ' MA20. Perlu candle selesai, hijau, close tembus high sebelumnya, HL, dan volume ≥1,3×.';
+    return;
+  }
+  scannerManual5mProofs[ticker]={
+    price,savedAt:Date.now(),last:v.last,average:v.average,
+    checks:v.checks.join(','),ratio:result.ratio
+  };
+  const btn=document.getElementById('scanner5mPaperBtn_'+ticker);
+  if(btn){btn.disabled=false;btn.textContent='🧪 Catat Paper (opsional)';}
+  if(el) el.textContent='🟢 PAPER WATCH MANUAL: volume '+ratio+
+    ' MA20. Data kamu belum diverifikasi otomatis; hanya simulasi.';
+}
+function scanner5mForm(ticker){
+  if(!/^[A-Z0-9]{1,7}$/.test(ticker)) return '';
+  const flags=[
+    ['closed','Candle 5m selesai'],
+    ['green','Candle hijau (close > open)'],
+    ['break','Close di atas high candle sebelumnya'],
+    ['hl','Higher Low terlihat pada grafik']
+  ];
+  return `
+  <div class="stockbit-confirm" style="margin-top:10px">
+    <div class="stockbit-confirm-title">📊 Volume Stockbit 5m • Manual</div>
+    <div class="small" style="margin:7px 0">Jika Yahoo WAIT_DATA, ambil volume dari grafik Stockbit 5m. Pilih candle yang SUDAH SELESAI, bukan candle berjalan. Jangan mencentang syarat yang belum terbukti.</div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,180px),1fr));gap:10px">
+      <label class="small" style="display:block">Volume candle 5m selesai
+        <input id="scanner5mLast_${ticker}" aria-label="Volume candle 5 menit selesai" class="stockbit-confirm-input" style="display:block;margin-top:6px" type="text" inputmode="decimal" placeholder="Contoh 2.48K" oninput="invalidateManual5m('${ticker}')">
+      </label>
+      <label class="small" style="display:block">MA20 volume 5m (garis rata-rata)
+        <input id="scanner5mAvg_${ticker}" aria-label="MA20 volume 5 menit" class="stockbit-confirm-input" style="display:block;margin-top:6px" type="text" inputmode="decimal" placeholder="Contoh 3.59K" oninput="invalidateManual5m('${ticker}')">
+      </label>
+    </div>
+    <div class="small" style="margin:7px 0">Volume minimal 1,30× MA20. Volume saja belum cukup tanpa seluruh syarat candle dan struktur.</div>
+    ${flags.map(([id,title])=>`<label class="small" style="display:block;margin:7px 0">
+    <input type="checkbox" id="scanner5m_${id}_${ticker}" onchange="invalidateManual5m('${ticker}')"> ${title}</label>`).join('')}
+    <button class="stockbit-confirm-btn" onclick="verifyManual5m('${ticker}')">✅ Validasi Manual 5m</button>
+    <div id="scanner5mResult_${ticker}" class="small" style="margin:7px 0">WAIT DATA • Belum ada validasi.</div>
+    <button class="stockbit-confirm-btn" id="scanner5mPaperBtn_${ticker}" disabled onclick="recordConfirmedScannerPaper('${ticker}')">🔒 Catat Paper — belum valid</button>
+  </div>`;
+}
+
+function recordConfirmedScannerPaper(ticker){
+  const pending = scannerPaperCandidates[ticker];
+  const resultEl = document.getElementById('scannerStockbitResult_' + ticker);
+  const input = document.getElementById('scannerStockbitInput_' + ticker);
+  if(!pending || (Date.now() - pending.savedAt) > 120000 ||
+     parseStockbitPrice(input?.value) !== pending.price){
+    if(resultEl){
+      resultEl.className='small yellow';
+      resultEl.textContent='Konfirmasi harga Stockbit lagi. Validasi paper hanya berlaku dua menit.';
+    }
+    delete scannerPaperCandidates[ticker];
+    return;
+  }
+  const proof=scannerManual5mProofs[ticker];
+  const v=getManual5mValues(ticker);
+  const result=manual5mAssessment(v.last,v.average,v.checks);
+  if(!proof||!result.ok||Date.now()-proof.savedAt>120000||
+     proof.price!==pending.price||proof.last!==v.last||
+     proof.average!==v.average||proof.checks!==v.checks.join(',')){
+    if(resultEl) resultEl.textContent='⏳ Validasi harga/volume 5m lagi sebelum Catat Paper.';
+    invalidateManual5m(ticker);
+    return;
+  }
+  if(!window.confirm(
+    'CATAT PAPER SIMULASI '+ticker+' @ '+compactNumber(pending.price)+
+    '? Bukti Stockbit MANUAL: volume '+result.ratio.toFixed(2)+'× MA20. Ini bukan BUY real.'
+  )) return;
+
+  const saved = recordStockbitPaperTrigger(pending.ctx, pending.price, 'MANUAL PAPER CONFIRMED');
+  if(resultEl){
+    resultEl.className = saved?.ok ? 'small green' : 'small red';
+    resultEl.textContent = saved?.message || 'Gagal mencatat paper trade.';
+  }
+  if(saved?.ok){
+    delete scannerPaperCandidates[ticker];
+    invalidateManual5m(ticker);
+  }
+}
+
+async function checkScannerTiming5m(item){
+  const ticker=String(item?.ticker||'').toUpperCase();
+  const target=document.getElementById('scannerTiming5m_'+ticker);
+  if(!target) return;
+  target.textContent='⏳ Memeriksa candle 5 menit yang sudah selesai...';
+  try{
+    const res=await fetch(STOCKRADAR_API_BASE+'/api/entry-timing?ticker='+encodeURIComponent(ticker),{cache:'no-store'});
+    const data=await res.json();
+    if(!res.ok || !data.success) throw new Error(data.error||'5m belum tersedia');
+    const checkList=Object.entries(data.checks||{})
+      .map(([k,v])=>(v?'✅ ':'❌ ')+k.replaceAll('_',' ')).join(' • ');
+    const status=String(data.status||'WAIT_DATA');
+    const confirmed=status==='BOUNCE_CONFIRMED';
+    target.innerHTML='<b class="'+(confirmed?'green':'yellow')+'">'+
+      (confirmed?'🟢 PANTULAN TERDETEKSI • PAPER WATCH':'⏳ '+status)+'</b>'+
+      '<br>'+String(data.reason||'')+
+      '<br>Volume '+(data.volume_ratio==null?'--':data.volume_ratio+'x')+
+      ' • Trigger indikatif '+(data.price_trigger==null?'--':compactNumber(data.price_trigger))+
+      ' • Swing low '+(data.swing_low==null?'--':compactNumber(data.swing_low))+
+      '<br>Bar selesai '+(data.bar_end_wib||'--')+' WIB'+
+      '<br>'+checkList+
+      (status==='WAIT_DATA'
+        ? '<br>📱 Yahoo belum cukup: isi volume dari candle selesai dan MA20 grafik Stockbit 5m pada kolom di bawah.'
+        : '')+
+      '<br><b>WAJIB cocokkan harga + pantulan dan volume di Stockbit sebelum paper entry.</b>';
+  }catch(e){
+    target.textContent='⏳ WAIT DATA: '+String(e.message||e)+' • Tidak ada sinyal otomatis.';
+  }
 }
 
 function confirmScannerStockbit(item){
@@ -4276,60 +4478,51 @@ function confirmScannerStockbit(item){
     }
   }
 
-  let paperRecord = null;
-
+  // Confirm button NEVER records a paper trade.
+  // Optional paper OPEN requires its own click and fresh Stockbit confirmation.
+  delete scannerPaperCandidates[item.ticker];
+  invalidateManual5m(item.ticker);
   if(level === 'GREEN'){
-    const ctx = {
-      ticker:item.ticker,
-      signalAction:'WAIT',
-      entryMode:mode,
-      entryLow,
-      entryHigh,
-      invalidation:cutLoss,
-      tp1,
-      tp2,
-      referencePrice:Number(item.close || 0),
-      radarScore:Number(item.score || 0),
-      scannerScore:Number(item.score || 0),
-      setup:item.setup || ('Genius ' + mode),
-      marketRegime:item.market_regime || 'Unknown',
-      regimeGateStatus:item.regime_gate_status || 'LEARNING',
-      regimeGateReason:item.regime_gate_reason || '',
-      regimeGateSample:Number(item.regime_gate_sample || 0),
-      signalDate:item.signal_date || null
+    label = '🟢 AREA SESUAI • TUNGGU KONFIRMASI';
+    note += ' Harga masuk zona, belum otomatis BUY. Pastikan ada pantulan dan volume.';
+    scannerPaperCandidates[item.ticker] = {
+      savedAt:Date.now(),price,
+      ctx:{
+        ticker:item.ticker,
+        signalAction:'WAIT',
+        entryMode:mode,
+        entryLow,entryHigh,
+        invalidation:cutLoss,
+        tp1,tp2,
+        referencePrice:Number(item.close || 0),
+        radarScore:Number(item.score || 0),
+        scannerScore:Number(item.score || 0),
+        setup:item.setup || ('Genius ' + mode),
+        marketRegime:item.market_regime || 'Unknown',
+        regimeGateStatus:item.regime_gate_status || 'LEARNING',
+        regimeGateReason:item.regime_gate_reason || '',
+        regimeGateSample:Number(item.regime_gate_sample || 0),
+        signalDate:item.signal_date || null
+      }
     };
-
-    paperRecord =
-      recordStockbitPaperTrigger(
-        ctx,
-        price,
-        label
-      );
-
-    if(paperRecord?.blocked){
-      level = 'RED';
-      label = '🚫 PAPER DIBLOKIR';
-    }
   }
 
   if(resultEl){
-    resultEl.className =
-      'small ' + stockbitDecisionClass(level);
-
+    resultEl.className = 'small ' + stockbitDecisionClass(level);
     resultEl.innerHTML =
       '<b>' + label + '</b><br>' +
       'Stockbit ' + compactNumber(price) +
       ' • ' + note +
-      (
-        paperRecord
-        ? '<br><b>' + paperRecord.message + '</b>'
-        : ''
-      );
+      (level === 'GREEN'
+        ? '<br>📊 Lanjut validasi volume Stockbit manual pada kolom di bawah.'
+        : '');
   }
 }
 
 
 async function addPaperTradesBatch(items){
+  alert('V2 Staging: TOP 3 otomatis nonaktif. Validasi harga Stockbit + struktur dan volume 5m secara manual pada tiap saham.');
+  return;
   const candidates =
   Array.isArray(items)
   ? items.slice(0,3)
@@ -4421,7 +4614,7 @@ async function addPaperTradesBatch(items){
 
     if(!live?.executionAllowed){
       liveFreshnessBlocked += 1;
-      continue;
+      continue; // Yahoo-only entry blocked
     }
 
     const createdAt =
@@ -4522,6 +4715,8 @@ async function addPaperTradesBatch(items){
 }
 
 async function addPaperTrade(item){
+  alert('V2 Staging: tombol Paper Trade lama nonaktif. Gunakan validasi harga + volume Stockbit manual di Scanner.');
+  return;
   const plan = item.paper_plan || {};
 
   if(!plan.entry){
@@ -4609,9 +4804,7 @@ async function addPaperTrade(item){
 
   if(!live?.executionAllowed){
     alert(
-      'WAIT DATA FRESH: harga masih ' +
-      String(live?.freshness || 'UNKNOWN').toUpperCase() +
-      '. Paper entry diblokir sampai status FRESH.'
+      'Paper otomatis diblokir: harga Yahoo bukan konfirmasi Stockbit. Masukkan harga Stockbit pada kartu saham untuk simulasi entry manual.'
     );
     return;
   }
@@ -4897,7 +5090,7 @@ async function updatePaperTrade(item){
   );
 
   const url =
-  'https://saham-tracker-api.onrender.com/api/paper-check?ticker=' +
+  STOCKRADAR_API_BASE + '/api/paper-check?ticker=' +
   encodeURIComponent(item.ticker) +
   '&since=' + encodeURIComponent(createdTs) +
   '&entry=' + encodeURIComponent(item.entry) +
@@ -7255,20 +7448,12 @@ function confirmStockbitPrice(){
     : 'Signal utama Radar: ' + action +
       '. Ini konfirmasi harga untuk paper/monitor, bukan izin uang asli.';
 
-  let paperRecord = null;
-
+  // Genius price confirmation is read-only on V2 staging.
+  // Paper entry is allowed only through the scanner manual 5m confirmation gate.
+  const paperRecord=null;
   if(level === 'GREEN'){
-    paperRecord =
-      recordStockbitPaperTrigger(
-        ctx,
-        price,
-        label
-      );
-
-    if(paperRecord?.blocked){
-      level = 'RED';
-      label = '🚫 PAPER DIBLOKIR';
-    }
+    label='🟢 HARGA SESUAI • TUNGGU KONFIRMASI 5M';
+    note += ' Buka Scanner untuk validasi manual 5m sebelum simulasi.';
   }
 
   if(resultEl){
@@ -7368,7 +7553,7 @@ async function refreshGeniusLiveQuote(ticker, referencePrice){
 
   try{
     const response = await fetch(
-      'https://saham-tracker-api.onrender.com/api/live-quote?ticker=' +
+      STOCKRADAR_API_BASE + '/api/live-quote?ticker=' +
       encodeURIComponent(ticker),
       {cache:'no-store'}
     );
@@ -8338,7 +8523,7 @@ async function runMarketRegimeValidation(){
 
       const response =
       await fetch(
-        'https://saham-tracker-api.onrender.com/api/market-regime-validation?tickers=' +
+        STOCKRADAR_API_BASE + '/api/market-regime-validation?tickers=' +
         encodeURIComponent(batchTickers.join(',')) +
         '&to=' +
         encodeURIComponent(date) +
@@ -8495,7 +8680,7 @@ async function runWalkForwardValidation(){
   try{
     const cutoffResponse =
     await fetch(
-      'https://saham-tracker-api.onrender.com/api/walk-forward-cutoff?reference=BBCA&to=' +
+      STOCKRADAR_API_BASE + '/api/walk-forward-cutoff?reference=BBCA&to=' +
       encodeURIComponent(date) +
       '&sessions=' +
       encodeURIComponent(sessions) +
@@ -8681,7 +8866,7 @@ async function runWalkForwardValidation(){
 
       const response =
       await fetch(
-        'https://saham-tracker-api.onrender.com/api/historical-walk-forward?tickers=' +
+        STOCKRADAR_API_BASE + '/api/historical-walk-forward?tickers=' +
         encodeURIComponent(batchTickers.join(',')) +
         '&to=' +
         encodeURIComponent(date) +
@@ -8812,7 +8997,7 @@ async function runExitABReplay(){
   try{
     const response =
     await fetch(
-      'https://saham-tracker-api.onrender.com/api/historical-exit-ab?tickers=' +
+      STOCKRADAR_API_BASE + '/api/historical-exit-ab?tickers=' +
       encodeURIComponent(tickers) +
       '&to=' +
       encodeURIComponent(date) +
@@ -9019,7 +9204,7 @@ async function runBatchHistoricalReplay(){
   try{
     const response =
     await fetch(
-      'https://saham-tracker-api.onrender.com/api/historical-replay-batch?tickers=' +
+      STOCKRADAR_API_BASE + '/api/historical-replay-batch?tickers=' +
       encodeURIComponent(tickers) +
       '&to=' +
       encodeURIComponent(date) +
@@ -9260,7 +9445,7 @@ async function runHistoricalReplay(){
   try{
     const response =
     await fetch(
-      'https://saham-tracker-api.onrender.com/api/historical-replay?ticker=' +
+      STOCKRADAR_API_BASE + '/api/historical-replay?ticker=' +
       encodeURIComponent(ticker) +
       '&to=' +
       encodeURIComponent(date) +
@@ -9414,7 +9599,300 @@ async function runHistoricalReplay(){
   }
 }
 
-async function runScanner(){
+function getScannerStored(mode,date){
+  try{
+    const saved = localStorage.getItem('stockradar_scan_v2_' + mode + '_' + date);
+    const parsed = saved ? JSON.parse(saved) : null;
+    if(!parsed || !parsed.data || !parsed.savedAt) return null;
+    return parsed;
+  }catch(e){return null;}
+}
+function storeScannerResult(mode,date,data){
+  try{
+    localStorage.setItem('stockradar_scan_v2_' + mode + '_' + date,
+      JSON.stringify({data,savedAt:Date.now()}));
+  }catch(e){console.warn('Scanner cache unavailable',e);}
+}
+// Auto Paper Watch is read-only. A daily signal selects which ticker to CHECK,
+// never which ticker to buy. The 5m feed is Yahoo indicative, not Stockbit.
+function autoPaperCandidateRank(item){
+  const low=Number(item?.entry_low||0), high=Number(item?.entry_high||0);
+  const signal=Number(item?.close||0);
+  if(!(signal>0&&low>0&&high>=low))return {group:9,gap:Infinity};
+  if(signal>=low&&signal<=high)return {group:0,gap:0};
+  const above=signal>high;
+  const gap=above?(signal/high-1)*100:(low/signal-1)*100;
+  return {group:gap<=3?(above?1:2):3,gap};
+}
+function autoPaperSelectCandidates(results){
+  return (Array.isArray(results)?results:[])
+    .filter(x=>x&&x.setup!=='Netral'&&Number(x.score||0)>=60
+      &&autoPaperCandidateRank(x).group<9)
+    .sort((a,b)=>{
+      const aa=autoPaperCandidateRank(a),bb=autoPaperCandidateRank(b);
+      return aa.group-bb.group||aa.gap-bb.gap||
+        Number(b.score||0)-Number(a.score||0);
+    }).slice(0,3);
+}
+let autoPaperBusy=false;
+async function runAutoPaperWatch(){
+  const box=document.getElementById('autoPaperWatchStatus');
+  if(autoPaperBusy)return;
+  autoPaperBusy=true;
+  try{
+    const date=document.getElementById('dateInput')?.value;
+    const full=getScannerStored('full',date), quick=getScannerStored('quick',date);
+    const stored=(full?.savedAt||0)>=(quick?.savedAt||0)?full:quick;
+    const items=autoPaperSelectCandidates(stored?.data?.results);
+    if(!items.length){
+      if(box)box.textContent='Belum ada kandidat. Scan Cepat atau Lengkap dahulu.';
+      return;
+    }
+    if(box)box.textContent='⏳ Memeriksa tiga kandidat berdasarkan zona sinyal harian, bukan harga live...';
+    const rows=[];
+    for(const item of items){
+      try{
+        const response=await fetch(STOCKRADAR_API_BASE+
+          '/api/entry-timing?ticker='+encodeURIComponent(item.ticker),{cache:'no-store'});
+        const data=await response.json();
+        const close=Number(data.last_completed_close||0);
+        const lo=Number(item.entry_low||0),hi=Number(item.entry_high||0);
+        const inZone=lo>0&&hi>=lo&&close>=lo&&close<=hi;
+        const wibToday=new Intl.DateTimeFormat('en-CA',{
+          timeZone:'Asia/Jakarta',year:'numeric',month:'2-digit',day:'2-digit'
+        }).format(new Date());
+        const sameDay=String(data.bar_end_wib||'').slice(0,10)===wibToday;
+        const confirmed=response.ok&&data.success&&data.status==='BOUNCE_CONFIRMED'
+          &&sameDay&&inZone&&data.live_trade_allowed===false;
+        let status=confirmed?'🟡 PAPER WATCH (verifikasi Stockbit)':
+          '⏳ '+String(data.status||'WAIT_DATA');
+        if(!response.ok||!data.success)status='⏳ WAIT_DATA';
+        const reason=confirmed
+          ?'Bar Yahoo selesai dan syarat indikatif lolos, BELUM entry'
+          :String(data.reason||data.error||'Sinyal 5m belum lengkap');
+        const count=Number(data.candle_count||0);
+        rows.push(item.ticker+' — '+status+' • '+reason+
+          ' • '+count+' candle selesai'+
+          (close>0?' • close Yahoo '+compactNumber(close):'')+
+          ' • zona '+compactNumber(lo)+'–'+compactNumber(hi));
+      }catch(e){
+        rows.push(item.ticker+' — WAIT_DATA: gagal mengambil atau membaca data Yahoo 5m');
+      }
+    }
+    if(box)box.textContent=rows.join(' | ')+
+      ' • 0 paper OPEN. Konfirmasi harga dan volume asli di Stockbit.';
+  }catch(e){
+    if(box)box.textContent='WAIT_DATA: pemindaian belum berhasil. Tidak ada paper OPEN.';
+  }finally{
+    autoPaperBusy=false;
+  }
+}
+const CA_ARCHIVE_KEY='stockradar-ca-last-success-v1';
+function keepCAArchive(html){
+  try{localStorage.setItem(CA_ARCHIVE_KEY,JSON.stringify({saved_at:new Date().toISOString(),html}));}catch(e){}
+}
+function caArchiveOnFailure(box,reason){
+  let cached=null;
+  try{cached=JSON.parse(localStorage.getItem(CA_ARCHIVE_KEY)||'null');}catch(e){}
+  if(cached && typeof cached.html==='string' && cached.html.length<150000 &&
+      cached.saved_at && !isNaN(Date.parse(cached.saved_at))){
+    // HTML is only ever produced by this app's own escaped, source-linked renderer.
+    box.innerHTML='<div class="note">⚠️ WAIT_DATA: '+caHtmlEscape(reason)
+      +'. Menampilkan ARSIP, bukan pengumuman baru. Terakhir tersimpan: '
+      +caHtmlEscape(cached.saved_at)+'. Data dapat kedaluwarsa. Jangan gunakan sebagai sinyal BUY.</div>'
+      +cached.html;
+  }else{
+    box.textContent='⚠️ WAIT_DATA: '+reason+'. Belum ada arsip yang tersimpan. Tidak berarti tidak ada CA.';
+  }
+}
+async function loadKSEIBackup(box){
+  try{
+    const response=await fetch(STOCKRADAR_API_BASE+'/api/ca-ksei',{cache:'no-store'});
+    const data=await response.json();
+    if(!response.ok || !data.success){
+      caArchiveOnFailure(box,'BEI ditolak; KSEI belum tersedia ('+String(data.error||'HTTP '+response.status)+')');
+      return;
+    }
+    const safe=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    const rows=Array.isArray(data.events)?data.events:[];
+    const registryOK=['FRESH','CACHED'].includes(String(data.equity_directory_status||''));
+    const equityMap=new Map();
+    for(const item of rows){
+      for(const share of (item.verified_equity_codes||[])){
+        if(share && share.ticker) equityMap.set(share.ticker,share.issuer||'');
+      }
+    }
+    const verified=[...equityMap.entries()].sort((a,b)=>a[0].localeCompare(b[0]));
+    const singles=rows.filter(x=>x.ticker_verified && !x.is_multi_instrument_notice);
+    const batches=rows.filter(x=>x.is_multi_instrument_notice);
+    const rest=rows.filter(x=>!x.is_multi_instrument_notice && !x.ticker_verified);
+    const card=x=>{
+      const matches=Array.isArray(x.verified_equity_codes)?x.verified_equity_codes:[];
+      const unresolved=Array.isArray(x.other_unverified_codes)?x.other_unverified_codes:[];
+      const verifiedText=matches.map(y=>y.ticker+' — '+y.issuer).join('; ');
+      return '<div class="status-box" style="margin-top:8px"><b>'
+        +safe(x.ticker_verified?'Kode saham KSEI: '+x.ticker
+          :x.is_multi_instrument_notice?'Pengumuman gabungan beberapa jenis efek':'Pengingat KSEI lainnya')
+        +'</b><div class="small">'+safe(x.title)
+        +'<br>Publikasi '+safe(x.published_at)
+        +(verifiedText?'<br>✅ Kode SAHAM cocok dengan daftar KSEI: '+safe(verifiedText):'')
+        +(unresolved.length?'<br>❓ Kode lain (belum terverifikasi sebagai saham): '+safe(unresolved.join(', ')):'')
+        +'<br>WATCH ONLY: kecocokan kode saham TIDAK membuktikan aksi korporasi tertentu atau peluang BUY.</div>'
+        +'<a href="'+safe(x.url)+'" target="_blank" rel="noopener noreferrer" style="color:#19e6a2">Lihat pengingat KSEI</a></div>';
+    };
+    box.innerHTML='<div class="note">⚠️ BEI belum dapat diakses. KSEI hanya pengingat sekunder, BUKAN radar pengumuman aksi baru.'
+      +'<br>Publikasi terbaru: '+safe(data.latest_publication)+' • '+rows.length+' pengingat.'
+      +'<br>Validasi kode saham: '+(registryOK?'DAFTAR SAHAM KSEI TERBACA':'BELUM BERHASIL')
+      +' • '+verified.length+' kode saham cocok • '+batches.length+' pengumuman gabungan.'
+      +(!registryOK?'<br>⚠️ '+safe(data.equity_directory_error||'Daftar resmi saham belum bisa dibaca')+'. Kode belum dinyatakan valid.':'')
+      +'<br>Belum mengidentifikasi pengumuman CA pertama. Bukan sinyal BUY.</div>'
+      +(verified.length?'<details style="margin:10px 0"><summary style="cursor:pointer;padding:12px;background:#112b43;border-radius:10px">📂 '+verified.length+' kode saham disebut dalam pengingat (BUKAN otomatis peluang BUY) — ketuk untuk melihat</summary>'
+        +'<div class="status-box">'+verified.map(([ticker,issuer])=>'<div>'+safe(ticker)+' — '+safe(issuer)+'</div>').join('')+'</div></details>':'')
+      +(singles.length?'<h3>🔎 Pengingat dengan satu kode saham</h3>'+singles.slice(0,10).map(card).join(''):'')
+      +(batches.length?'<details style="margin:10px 0"><summary style="cursor:pointer;padding:12px;background:#112b43;border-radius:10px">📚 '+batches.length+' pengingat gabungan (administratif) — lihat detail</summary>'+batches.slice(0,8).map(card).join('')+'</details>':'')
+      +(rest.length?'<details style="margin:10px 0"><summary style="cursor:pointer;padding:12px;background:#112b43;border-radius:10px">🗂️ '+rest.length+' pengingat lainnya — lihat detail</summary>'+rest.slice(0,6).map(card).join('')+'</details>':'')
+      +(!rows.length?'<div class="note">Tidak ada pengingat terbaru yang bisa dibaca. Bukan bukti tidak ada CA.</div>':'');
+    keepCAArchive(box.innerHTML);
+  }catch(e){
+    caArchiveOnFailure(box,'BEI dan KSEI gagal dihubungi');
+  }
+}
+
+const AUTO_CA_CHECK_EVERY_MS = 15*60*1000;
+let autoCALastAttempt = 0;
+let autoCABusy = false;
+async function loadAutoCA(force=true){
+  const box=document.getElementById('autoCAResults');
+  if(!box || autoCABusy)return;
+  if(!force && Date.now()-autoCALastAttempt<AUTO_CA_CHECK_EVERY_MS)return;
+  autoCALastAttempt=Date.now();
+  autoCABusy=true;
+  box.textContent='Membaca pengumuman resmi BEI...';
+  try{
+    const response=await fetch(STOCKRADAR_API_BASE+'/api/ca-discovery',{cache:'no-store'});
+    const data=await response.json();
+    if(!response.ok||!data.success){
+      box.textContent='⚠️ BEI tidak tersedia: '+String(data.error||'HTTP '+response.status)
+        +'. Mencoba pengingat KSEI sebagai sumber sekunder...';
+      await loadKSEIBackup(box);
+      return;
+    }
+    const safe=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    const events=data.events||[];
+    box.innerHTML='<div class="small">IDX • Dibaca '+Number(data.fetched_rows||0)+' pengumuman • Cocok CA '+events.length
+      +' • '+safe(data.fetched_at_utc||'')+' UTC. Judul saja, detail BELUM diverifikasi.</div>'
+      +(events.length?events.slice(0,30).map(x=>'<div class="status-box" style="margin-top:8px">'
+       +'<b>'+safe(x.ticker)+' • '+safe(x.category)+'</b>'
+       +'<div class="small">'+safe(x.title)+'<br>'+safe(x.published_at)
+       +'<br>WATCH ONLY — verifikasi dokumen sebelum keputusan trading</div>'
+       +'<a href="'+safe(x.url)+'" target="_blank" rel="noopener noreferrer" style="color:#19e6a2">Lihat sumber BEI</a>'
+       +'</div>').join('')
+       :'<div class="note">Tidak ditemukan judul kategori CA pada halaman yang berhasil dibaca. Ini BUKAN bukti tidak ada aksi korporasi.</div>');
+  }catch(e){
+    box.textContent='⚠️ WAIT_DATA: gagal menghubungi sumber resmi. Tidak bisa memastikan corporate action terkini.';
+  }finally{
+    autoCABusy=false;
+  }
+}
+
+const CA_WATCH_KEY = 'stockradar-v2-ca-watchlist-v1';
+const CA_TYPE_LABELS = {
+  RIGHTS_ISSUE:'Rights Issue',MERGER_AKUISISI:'Merger / Akuisisi',
+  BACKDOOR:'Dugaan Backdoor Listing',DIVIDEN:'Dividen',
+  STOCK_SPLIT:'Stock Split / Reverse Split',SAHAM_BONUS:'Saham Bonus',
+  RUPS:'RUPS / RUPSLB',LAINNYA:'Lainnya / Belum Diketahui'
+};
+function caHtmlEscape(value) {
+  return String(value == null ? '' : value).replace(/[&<>"']/g, ch=>({
+    '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+  }[ch]));
+}
+function getCAWatch() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(CA_WATCH_KEY)||'[]');
+    if(!Array.isArray(raw)) return [];
+    return raw.filter(x=>x && /^[A-Z0-9]{1,7}$/.test(x.ticker||'')).slice(0,15);
+  } catch(e) {return [];}
+}
+function saveCAWatch(rows) {
+  try {localStorage.setItem(CA_WATCH_KEY,JSON.stringify(rows));return true;}
+  catch(e) {alert('Penyimpanan browser tidak tersedia. Periksa mode privat atau kapasitas penyimpanan.');return false;}
+}
+function renderCAWatch() {
+  const element=document.getElementById('caWatchResults');
+  if(!element)return;
+  const items=getCAWatch();
+  if(!items.length){element.innerHTML='<div class="note">Belum ada ticker CA. Tambahkan kode saham untuk memulai pantauan.</div>';return;}
+  element.innerHTML=items.map((item,index)=>'<div class="status-box" style="margin-top:8px">'
+    +'<b>'+caHtmlEscape(item.ticker)+'</b> • '+caHtmlEscape(CA_TYPE_LABELS[item.type]||'Lainnya')
+    +'<div class="small">Status: PERLU VERIFIKASI MANUAL • '
+    +(item.date?'Agenda dicatat: '+caHtmlEscape(item.date):'Tanggal belum dicatat')
+    +(item.note?'<br>Catatan: '+caHtmlEscape(item.note):'')
+    +(item.source?'<br><a target="_blank" rel="noopener noreferrer" style="color:#19e6a2" href="'+caHtmlEscape(item.source)+'">Buka tautan sumber (belum diverifikasi StockRadar)</a>':'<br>Belum ada tautan sumber resmi')
+    +'</div><button class="refresh" style="margin-top:8px;background:#30445d;color:#fff" onclick="removeCAWatch('+index+')">Hapus Pantauan</button></div>'
+  ).join('');
+}
+function addCAWatch() {
+  const ticker=document.getElementById('caTicker').value.trim().toUpperCase();
+  if(!/^[A-Z0-9]{1,7}$/.test(ticker)){alert('Kode saham harus 1-7 huruf/angka.');return;}
+  const rows=getCAWatch();
+  if(rows.some(x=>x.ticker===ticker)){alert('Saham sudah ada. Hapus dulu jika mau mengganti detail.');return;}
+  if(rows.length>=15){alert('Maksimal 15 saham. Hapus yang tidak dibutuhkan dulu.');return;}
+  const source=document.getElementById('caSource').value.trim();
+  if(source && !/^https:\/\//i.test(source)){alert('Gunakan tautan HTTPS yang valid.');return;}
+  if(source){try{if(new URL(source).protocol!=='https:')throw Error('invalid');}catch(e){alert('Tautan sumber tidak valid.');return;}}
+  rows.push({
+    ticker,type:document.getElementById('caType').value,
+    date:document.getElementById('caDate').value,
+    source,note:document.getElementById('caNote').value.trim().slice(0,250)
+  });
+  if(!saveCAWatch(rows))return;
+  document.getElementById('caTicker').value='';
+  document.getElementById('caSource').value='';
+  document.getElementById('caNote').value='';
+  document.getElementById('caDate').value='';
+  renderCAWatch();
+}
+function removeCAWatch(index) {
+  const rows=getCAWatch();
+  if(index<0||index>=rows.length)return;
+  rows.splice(index,1);
+  if(saveCAWatch(rows))renderCAWatch();
+}
+renderCAWatch();
+
+async function runMoverScan(mode='quick'){
+  const target=document.getElementById(mode==='ca'?'caMoverResults':'moverResults');
+  if(!target)return;
+  let tickers=[];
+  if(mode==='ca'){
+    tickers=getCAWatch().map(x=>x.ticker);
+    if(!tickers.length){target.textContent='Tambahkan minimal satu saham dalam daftar pantauan CA dulu.';return;}
+  }
+  target.textContent='Memeriksa pergerakan harga Yahoo 5m...';
+  try {
+    const url=STOCKRADAR_API_BASE+'/api/movers?mode='+encodeURIComponent(mode)
+      +(mode==='ca'?'&tickers='+encodeURIComponent(tickers.join(',')):'');
+    const response=await fetch(url,{cache:'no-store'});
+    if(!response.ok)throw new Error('HTTP '+response.status);
+    const data=await response.json();
+    if(!data.success)throw new Error(data.error||'Data tidak tersedia');
+    const htmlSafe=value=>String(value).replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
+    const rows=(data.movers||[]);
+    const rising=rows.filter(x=>x.change_pct>=1);
+    target.innerHTML='<div class="small">Sesi '+htmlSafe(data.date_wib)+' WIB • Terbaca '+data.scanned+'/'+data.universe_size+' • Gagal/kosong '+data.missing+' • Sumber Yahoo indikatif, bukan live IDX.</div>'
+      +(rising.length?'<div class="note">🟢 '+rising.length+' saham naik minimal 1% di hasil pantauan (tidak selalu semua saham tersedia).</div>':'<div class="note">Belum ada saham naik ≥1% dari data sesi saat ini. Jangan menyimpulkan market tidak bergerak jika data kosong/tertunda.</div>')
+      +(rows.length?rows.map(x=>'<div class="status-box" style="margin-top:8px"><b>'+htmlSafe(x.ticker)+' • '+Number(x.change_pct).toFixed(2)+'%</b>'
+       +'<div class="small">Harga Yahoo '+Number(x.price)+' • '+htmlSafe(x.quote_time_wib)+' WIB • '+htmlSafe(x.freshness)+' • Umur '+Math.round(x.age_seconds/60)+' menit'
+       +' • Volume 5m '+(x.volume_ratio_5m==null?'belum cukup':Number(x.volume_ratio_5m).toFixed(2)+'x')
+       +'<br>🔎 WATCH ONLY — konfirmasi di Stockbit. Bukan sinyal BUY.</div></div>').join(''):'<div class="note">Tidak ada data intraday sesi ini yang layak dibandingkan. Cek kembali sumber data.</div>');
+  }catch(error){
+    target.textContent='WAIT_DATA: radar pergerakan belum berhasil. '+error.message+'. Tidak ada sinyal BUY.';
+  }
+}
+
+async function runScanner(mode='quick', force=false){
+  mode = mode === 'full' ? 'full' : 'quick';
   const date =
   document
   .getElementById('dateInput')
@@ -9429,13 +9907,21 @@ async function runScanner(){
   document.getElementById('scannerResults');
 
   target.innerHTML =
-  '<div class="loading">Memindai saham IDX...</div>';
+  '<div class="loading">' + (mode === 'quick' ? '⚡ Memindai 20 saham pilihan...' : '🔎 Memindai universe lengkap...') + '</div>';
 
   try{
+    const stored = getScannerStored(mode,date);
+    const nowWib = new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Jakarta'}).format(new Date());
+    const ttl = date === nowWib ? 10*60*1000 : 24*60*60*1000;
+    const useStored = !force && stored && Date.now()-stored.savedAt < ttl;
+    let data;
+    if(useStored){
+      data=stored.data;
+    }else{
     const response =
     await fetch(
-      'https://saham-tracker-api.onrender.com/api/scanner?to=' +
-      encodeURIComponent(date),
+      STOCKRADAR_API_BASE + '/api/scanner?to=' +
+      encodeURIComponent(date) + '&mode=' + encodeURIComponent(mode),
       {cache:'no-store'}
     );
 
@@ -9444,7 +9930,13 @@ async function runScanner(){
       throw new Error('HTTP ' + response.status + ' - ' + txt);
     }
 
-    const data = await response.json();
+    data = await response.json();
+    if(data && data.success) storeScannerResult(mode,date,data);
+    }
+    const savedTime = useStored ? new Date(stored.savedAt).toLocaleString('id-ID',{timeZone:'Asia/Jakarta'}) + ' WIB' : '';
+    const scannerCacheNotice = useStored
+      ? '<div class="note">📦 Hasil scan tersimpan (' + savedTime + '). Ini bukan harga live. <button class="refresh" onclick="runScanner(\''+mode+'\',true)">🔄 Perbarui scan</button></div>'
+      : '<div class="note">✅ Scan selesai. Data candle tertutup; Yahoo hanya indikasi. Konfirmasi harga Stockbit sebelum paper entry.</div>';
 
     const marketRegimeInfo =
     data.market_regime || {
@@ -9532,6 +10024,43 @@ async function runScanner(){
       Number(a.score || 0)
     );
 
+    // Indicative entry proximity: use the closed daily signal price, never
+    // pretend this is a current verified Stockbit quote.
+    const entryProximity = item => {
+      const low=Number(item.entry_low||0),high=Number(item.entry_high||0);
+      const signal=Number(item.close||0);
+      if(!(low>0&&high>=low&&signal>0)) return {rank:4,gap:null};
+      if(signal>=low&&signal<=high) return {rank:0,gap:0};
+      if(signal>high) {
+        const gap=100*(signal/high-1);
+        return {rank:gap<=3?1:3,gap};
+      }
+      const gap=100*(low/signal-1);
+      return {rank:gap<=3?2:3,gap:-gap};
+    };
+    const entryShortlist = (eligiblePool.length ? eligiblePool : fallbackPool)
+      .slice().sort((a,b)=>{
+        const aa=entryProximity(a),bb=entryProximity(b);
+        return aa.rank-bb.rank || gatePriority(a.regime_gate_status)-gatePriority(b.regime_gate_status)
+          || Number(b.score||0)-Number(a.score||0);
+      }).slice(0,5);
+    const shortlistHtml = '<div class="note" style="margin-top:12px">'
+      +'<b>🎯 RADAR KANDIDAT ENTRY (INDIKATIF)</b>'
+      +'<div class="small" style="margin-top:5px">Urutan berdasarkan harga SINYAL harian terhadap zona, bukan harga Stockbit live. Wajib verifikasi Stockbit dan candle 5m. Tidak ada BUY otomatis.</div>'
+      +entryShortlist.map(x=>{
+        const p=entryProximity(x);
+        const status=p.rank===0?'DALAM ZONA SINYAL'
+          :p.rank===1?'DEKAT ZONA (DI ATAS)'
+          :p.rank===2?'DEKAT ZONA (DI BAWAH)'
+          :'JAUH / CEK STOCKBIT';
+        return '<div class="status-box" style="margin-top:8px"><b>'+x.ticker
+          +' • Score '+Number(x.score||0).toFixed(1)+'</b>'
+          +'<div class="small">'+status+' • Sinyal '+compactNumber(x.close)
+          +' • Zona '+compactNumber(x.entry_low)+'–'+compactNumber(x.entry_high)
+          +' • Gap '+(p.gap==null?'--':p.gap.toFixed(2)+'%')
+          +'<br>Konfirmasi harga aktual di kartu saham bawah; ini hanya prioritas pengecekan.</div></div>';
+      }).join('')+'</div>';
+
     const topPicks =
     (eligiblePool.length
       ? eligiblePool
@@ -9561,10 +10090,10 @@ async function runScanner(){
         <div class="small" style="margin-top:4px">
           Kandidat utama tidak diulang lagi di daftar bawah.
         </div>
-        <button class="refresh"
+        <button class="refresh scanner-paper-locked"
           style="margin-top:10px"
-          onclick='addPaperTradesBatch(${JSON.stringify(topPicks)})'>
-          🧪 Paper Trade TOP 3
+          disabled title="Auto Paper nonaktif. Validasi manual Stockbit per saham terlebih dahulu">
+          🔒 Auto Paper TOP 3 nonaktif
         </button>
         <div id="batchPaperStatus" class="small" style="margin-top:7px">
           Tambahkan kandidat utama sekaligus untuk mempercepat pengumpulan sampel.
@@ -9595,6 +10124,7 @@ async function runScanner(){
             <div class="stockbit-confirm-row">
               <input
                 id="scannerStockbitInput_${x.ticker}"
+                oninput="invalidateManual5m('${x.ticker}')"
                 class="stockbit-confirm-input"
                 type="text"
                 inputmode="decimal"
@@ -9611,12 +10141,15 @@ async function runScanner(){
             <div id="scannerStockbitResult_${x.ticker}" class="small" style="margin-top:7px">
               Masukkan harga terakhir dari Stockbit.
             </div>
+            <button class="stockbit-confirm-btn" style="margin-top:9px" onclick='checkScannerTiming5m(${JSON.stringify(x)})'>📊 Cek Pantulan + Volume 5m</button>
+            <div id="scannerTiming5m_${x.ticker}" class="small" style="margin-top:7px;line-height:1.6">Belum ada uji candle 5 menit. Sinyal tetap TUNGGU.</div>
+            ${scanner5mForm(x.ticker)}
           </div>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:9px">
-            <button class="refresh"
+            <button class="refresh scanner-paper-locked"
               style="margin-top:0"
-              onclick='addPaperTrade(${JSON.stringify(x)})'>
-              🧪 Paper Trade
+              disabled title="Terkunci. Gunakan tombol Catat Paper setelah validasi Stockbit 5m">
+              🔒 Paper terkunci • cek 5m
             </button>
             <button class="refresh"
               style="margin-top:0"
@@ -9670,6 +10203,7 @@ async function runScanner(){
           <div class="stockbit-confirm-row">
             <input
               id="scannerStockbitInput_${x.ticker}"
+              oninput="invalidateManual5m('${x.ticker}')"
               class="stockbit-confirm-input"
               type="text"
               inputmode="decimal"
@@ -9686,12 +10220,13 @@ async function runScanner(){
           <div id="scannerStockbitResult_${x.ticker}" class="small" style="margin-top:7px">
             Masukkan harga terakhir dari Stockbit.
           </div>
+          ${scanner5mForm(x.ticker)}
         </div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:9px">
-          <button class="refresh"
+          <button class="refresh scanner-paper-locked"
             style="margin-top:0"
-            onclick='addPaperTrade(${JSON.stringify(x)})'>
-            🧪 Paper Trade
+            disabled title="Terkunci. Gunakan tombol Catat Paper setelah validasi Stockbit 5m">
+            🔒 Paper terkunci • cek 5m
           </button>
           <button class="refresh"
             style="margin-top:0"
@@ -9712,8 +10247,8 @@ async function runScanner(){
     `).join('');
 
     target.innerHTML =
-    (topPicksHtml + html) ||
-    '<div class="note">Belum ada kandidat yang lolos filter.</div>';
+    scannerCacheNotice + shortlistHtml + ((topPicksHtml + html) ||
+    '<div class="note">Belum ada kandidat yang lolos filter.</div>');
 
     if(topPicks.length){
       refreshScannerLivePrices(topPicks);
@@ -9987,7 +10522,7 @@ if(refreshBtn){
 
     let response =
     await fetch(
-      'https://saham-tracker-api.onrender.com/api/radar?ticker=' +
+      STOCKRADAR_API_BASE + '/api/radar?ticker=' +
 encodeURIComponent(ticker) +
 '&from=' +
 encodeURIComponent(date) +
@@ -10242,6 +10777,13 @@ updateAlertBadge();
 renderAlerts();
 setupBackgroundMonitor();
 importBackgroundAlerts();
+
+// Only poll when the scanner page is visible. Browsers can pause background tabs.
+setInterval(()=>{
+  const scanner=document.getElementById('scanner');
+  if(document.hidden || !scanner || !scanner.classList.contains('active-section'))return;
+  loadAutoCA(false);
+}, 60 * 1000);
 
 let paperAutoMonitorBusy = false;
 

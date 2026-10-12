@@ -1,0 +1,13 @@
+# Optional separate Render staging service (do NOT apply to existing production service).
+# Create a new Blueprint from this branch. No IndexAlpha key needed for Yahoo scanner.
+services:
+  - type: web
+    name: stockradar-v2-staging
+    runtime: python
+    plan: free
+    branch: stockradar-v2-fast-scan-20261012
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:app --bind 0.0.0.0:$PORT --workers 1 --threads 4 --timeout 120
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.9

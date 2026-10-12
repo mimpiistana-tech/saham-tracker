@@ -4167,6 +4167,33 @@ function recordConfirmedScannerPaper(ticker){
   if(saved?.ok) delete scannerPaperCandidates[ticker];
 }
 
+async function checkScannerTiming5m(item){
+  const ticker=String(item?.ticker||'').toUpperCase();
+  const target=document.getElementById('scannerTiming5m_'+ticker);
+  if(!target) return;
+  target.textContent='⏳ Memeriksa candle 5 menit yang sudah selesai...';
+  try{
+    const res=await fetch(STOCKRADAR_API_BASE+'/api/entry-timing?ticker='+encodeURIComponent(ticker),{cache:'no-store'});
+    const data=await res.json();
+    if(!res.ok || !data.success) throw new Error(data.error||'5m belum tersedia');
+    const checkList=Object.entries(data.checks||{})
+      .map(([k,v])=>(v?'✅ ':'❌ ')+k.replaceAll('_',' ')).join(' • ');
+    const status=String(data.status||'WAIT_DATA');
+    const confirmed=status==='BOUNCE_CONFIRMED';
+    target.innerHTML='<b class="'+(confirmed?'green':'yellow')+'">'+
+      (confirmed?'🟢 PANTULAN TERDETEKSI • PAPER WATCH':'⏳ '+status)+'</b>'+
+      '<br>'+String(data.reason||'')+
+      '<br>Volume '+(data.volume_ratio==null?'--':data.volume_ratio+'x')+
+      ' • Trigger indikatif '+(data.price_trigger==null?'--':compactNumber(data.price_trigger))+
+      ' • Swing low '+(data.swing_low==null?'--':compactNumber(data.swing_low))+
+      '<br>Bar selesai '+(data.bar_end_wib||'--')+' WIB'+
+      '<br>'+checkList+
+      '<br><b>WAJIB cocokkan harga + pantulan dan volume di Stockbit sebelum paper entry.</b>';
+  }catch(e){
+    target.textContent='⏳ WAIT DATA: '+String(e.message||e)+' • Tidak ada sinyal otomatis.';
+  }
+}
+
 function confirmScannerStockbit(item){
   const input =
     document.getElementById('scannerStockbitInput_' + item.ticker);
@@ -9617,6 +9644,8 @@ async function runScanner(mode='quick', force=false){
             <div id="scannerStockbitResult_${x.ticker}" class="small" style="margin-top:7px">
               Masukkan harga terakhir dari Stockbit.
             </div>
+            <button class="stockbit-confirm-btn" style="margin-top:9px" onclick='checkScannerTiming5m(${JSON.stringify(x)})'>📊 Cek Pantulan + Volume 5m</button>
+            <div id="scannerTiming5m_${x.ticker}" class="small" style="margin-top:7px;line-height:1.6">Belum ada uji candle 5 menit. Sinyal tetap TUNGGU.</div>
           </div>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:9px">
             <button class="refresh"

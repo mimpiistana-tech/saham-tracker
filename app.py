@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from movers import build_mover
+from idx_ca import fetch_idx_announcements, IDX_LIST
 
 from radar_score import (
     score_from_broker_rows,
@@ -678,6 +679,46 @@ def build_scanner_reason(item):
 
     return ", ".join(reasons) + "; " + action_note
 
+
+
+@app.route("/api/ca-discovery")
+def ca_discovery():
+    """Official IDX CA headline candidate discovery, WATCH ONLY."""
+    cache_key="idx_ca_discovery_v1"
+    cached,state=cache_get(cache_key,max_age=15*60)
+    if cached and state=="HIT":
+        response=jsonify(cached["data"])
+        response.headers["X-StockRadar-Cache"]="HIT"
+        return response,200
+    try:
+        result=fetch_idx_announcements()
+        payload={
+            "success":True,"source":"IDX","source_url":IDX_LIST,
+            "status":"OK" if result["fetched_rows"]>0 else "EMPTY_FEED",
+            "fetched_rows":result["fetched_rows"],
+            "events":result["events"],
+            "event_count":len(result["events"]),
+            "fetched_at_utc":datetime.utcnow().isoformat()+"Z",
+            "monitoring_mode":"ON_DEMAND_PAGE_OPEN",
+            "coverage":"Halaman pertama, maksimum 100 pengumuman; tidak menjamin semua emiten tercakup.",
+            "note":"Deteksi judul pengumuman saja; dokumen, jadwal, besaran aksi, dan dampaknya belum diverifikasi. Bukan sinyal BUY.",
+            "buy_signal":False,
+        }
+        if result["fetched_rows"]<=0:
+            return jsonify({**payload,"success":False,
+                "error":"IDX tidak mengirim pengumuman; sumber belum dapat divalidasi."}),503
+        cache_put(cache_key,payload,200)
+        response=jsonify(payload)
+        response.headers["X-StockRadar-Cache"]="MISS"
+        return response,200
+    except (requests.RequestException,RuntimeError,ValueError,TypeError) as exc:
+        return jsonify({
+            "success":False,"status":"SOURCE_UNAVAILABLE",
+            "source":"IDX","source_url":IDX_LIST,"events":[],
+            "error":str(exc)[:200],
+            "buy_signal":False,
+            "note":"Pengumuman resmi belum dapat dibaca. Jangan menganggap tidak ada aksi korporasi.",
+        }),503
 
 
 @app.route("/api/movers")

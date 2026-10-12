@@ -73,7 +73,7 @@ def home():
         return f.read()
 
 
-def cache_get(key):
+def cache_get(key, max_age=CACHE_TTL):
     cached = CACHE.get(key)
 
     if not cached:
@@ -81,7 +81,7 @@ def cache_get(key):
 
     age = time.time() - cached["time"]
 
-    if age < CACHE_TTL:
+    if age < max_age:
         return cached, "HIT"
 
     return cached, "STALE"
@@ -284,7 +284,11 @@ def get_ohlcv(ticker, date_to):
     symbol = f"{ticker}.JK"
 
     cache_key = f"yahoo_ohlcv_{symbol}_{start_date.isoformat()}_{end_date.isoformat()}"
-    cached, cache_state = cache_get(cache_key)
+
+    # OHLCV harian pada sesi berjalan dapat berubah: jangan gunakan cache 24 jam.
+    today_wib = (datetime.utcnow() + timedelta(hours=7)).date()
+    ttl = 10 * 60 if end_date >= today_wib else CACHE_TTL
+    cached, cache_state = cache_get(cache_key, max_age=ttl)
 
     if cached and cache_state == "HIT":
         return cached["data"], cached["status"], "HIT"

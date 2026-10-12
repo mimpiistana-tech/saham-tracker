@@ -2,7 +2,7 @@
 import unittest
 from unittest.mock import patch
 from datetime import datetime, timezone, timedelta
-from ksei_ca import parse_ksei_news
+from ksei_ca import parse_ksei_news, possible_equity_codes
 import app
 
 class KSEICATests(unittest.TestCase):
@@ -15,6 +15,23 @@ class KSEICATests(unittest.TestCase):
         self.assertEqual(data["events"][0]["ticker"],"NAYZ")
         self.assertFalse(data["events"][0]["buy_signal"])
         self.assertEqual(data["events"][0]["category"],"KSEI_REMINDER")
+    def test_mixed_security_codes_not_assumed_to_be_stock(self):
+        title="Reminder Corporate Action Recording Date : BRPT03ACN3 GEM S AALI PRNS33XXMF RDTX"
+        self.assertEqual(possible_equity_codes(title),["AALI","RDTX"])
+        html='<ul><li>12 Oktober 2026 <a href="/reminder">'+title+'</a></li></ul>'
+        result=parse_ksei_news(html,now=datetime(2026,10,12,tzinfo=timezone(timedelta(hours=7))))
+        item=result["events"][0]
+        self.assertIsNone(item["ticker"])
+        self.assertTrue(item["is_multi_instrument_notice"])
+        self.assertFalse(item["ticker_verified"])
+
+    def test_single_ticker_is_only_candidate(self):
+        html='<ul><li>12 Oktober 2026 <a href="/item">Reminder Corporate Action: NAYZ</a></li></ul>'
+        item=parse_ksei_news(html,now=datetime(2026,10,12,tzinfo=timezone(timedelta(hours=7))))["events"][0]
+        self.assertEqual(item["ticker"],"NAYZ")
+        self.assertFalse(item["ticker_verified"])
+        self.assertFalse(item["buy_signal"])
+
     def test_stale_rejected(self):
         body='<ul><li>1 Januari 2020 <a href="/item">Reminder Corporate Action: NAYZ</a></li></ul>'
         data=parse_ksei_news(body,now=datetime(2026,10,12,tzinfo=timezone(timedelta(hours=7))))

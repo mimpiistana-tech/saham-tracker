@@ -967,7 +967,7 @@ berapa persen mesin yang sudah aktif.
 
   <div class="card">
     <h2>🏆 Hasil Scanner</h2>
-    <div class="note" style="border:1px solid #19e6a2;margin:7px 0;padding:9px">🛡️ V2-SAFE-1052 • Tombol Konfirmasi hanya cek harga, tidak mencatat Paper OPEN.</div>
+    <div class="note" style="border:1px solid #19e6a2;margin:7px 0;padding:9px">🛡️ V2-MANUAL-5M • Konfirmasi cek harga saja. Paper memerlukan cek volume dan struktur 5m manual.</div>
     <div id="scannerResults">
       <div class="loading">Belum discan.</div>
     </div>
@@ -4155,7 +4155,7 @@ function manual5mAssessment(last,average,checks){
     return {ok:false,ratio:null,status:'WAIT_DATA'};
   }
   const ratio=last/average;
-  if(!checks.every(Boolean)||ratio<1.3){
+  if(!Array.isArray(checks)||checks.length!==4||!checks.every(Boolean)||ratio<1.3){
     return {ok:false,ratio,status:'WAIT_CONFIRMATION'};
   }
   return {ok:true,ratio,status:'PAPER_WATCH_MANUAL'};
@@ -7359,20 +7359,12 @@ function confirmStockbitPrice(){
     : 'Signal utama Radar: ' + action +
       '. Ini konfirmasi harga untuk paper/monitor, bukan izin uang asli.';
 
-  let paperRecord = null;
-
+  // Genius price confirmation is read-only on V2 staging.
+  // Paper entry is allowed only through the scanner manual 5m confirmation gate.
+  const paperRecord=null;
   if(level === 'GREEN'){
-    paperRecord =
-      recordStockbitPaperTrigger(
-        ctx,
-        price,
-        label
-      );
-
-    if(paperRecord?.blocked){
-      level = 'RED';
-      label = '🚫 PAPER DIBLOKIR';
-    }
+    label='🟢 HARGA SESUAI • TUNGGU KONFIRMASI 5M';
+    note += ' Buka Scanner untuk validasi manual 5m sebelum simulasi.';
   }
 
   if(resultEl){
@@ -9696,8 +9688,8 @@ async function runScanner(mode='quick', force=false){
         </div>
         <button class="refresh"
           style="margin-top:10px"
-          onclick='addPaperTradesBatch(${JSON.stringify(topPicks)})'>
-          🧪 Paper Trade TOP 3
+          disabled title="Validasi Stockbit manual per saham dahulu">
+          🔒 Auto Paper TOP 3 nonaktif
         </button>
         <div id="batchPaperStatus" class="small" style="margin-top:7px">
           Tambahkan kandidat utama sekaligus untuk mempercepat pengumpulan sampel.
@@ -9751,8 +9743,8 @@ async function runScanner(mode='quick', force=false){
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:9px">
             <button class="refresh"
               style="margin-top:0"
-              onclick='addPaperTrade(${JSON.stringify(x)})'>
-              🧪 Paper Trade
+              disabled title="Gunakan validasi Stockbit 5m manual">
+              🔒 Paper via validasi 5m
             </button>
             <button class="refresh"
               style="margin-top:0"
@@ -9827,8 +9819,8 @@ async function runScanner(mode='quick', force=false){
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:9px">
           <button class="refresh"
             style="margin-top:0"
-            onclick='addPaperTrade(${JSON.stringify(x)})'>
-            🧪 Paper Trade
+            disabled title="Gunakan validasi Stockbit 5m manual">
+            🔒 Paper via validasi 5m
           </button>
           <button class="refresh"
             style="margin-top:0"

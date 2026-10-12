@@ -967,6 +967,7 @@ berapa persen mesin yang sudah aktif.
 
   <div class="card">
     <h2>🏆 Hasil Scanner</h2>
+    <div class="note" style="border:1px solid #19e6a2;margin:7px 0;padding:9px">🛡️ V2-SAFE-1052 • Tombol Konfirmasi hanya cek harga, tidak mencatat Paper OPEN.</div>
     <div id="scannerResults">
       <div class="loading">Belum discan.</div>
     </div>
@@ -1563,6 +1564,7 @@ Paper
 
 
 <script>
+const STOCKRADAR_BUILD = 'V2-SAFE-1052';
 const STOCKRADAR_API_BASE =
   (window.location.hostname.endsWith('.onrender.com')
     ? window.location.origin

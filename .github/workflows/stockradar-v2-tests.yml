@@ -29,6 +29,10 @@ jobs:
         run: python -m py_compile app.py radar_score.py
       - name: Offline API tests
         run: python -m unittest discover -s tests -p 'test_*.py' -v
+      - name: Test Yahoo integration (read-only)
+        env:
+          PYTHONUNBUFFERED: '1'
+        run: python tests/live_scanner_check.py
       - name: Check frontend syntax
         run: |
           python - <<'PY'

@@ -1,0 +1,44 @@
+name: StockRadar V2 Tests
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [stockradar-v2-fast-scan-20261012]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  offline-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: requirements.txt
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Check backend syntax
+        run: python -m py_compile app.py radar_score.py
+      - name: Offline API tests
+        run: python -m unittest discover -s tests -p 'test_*.py' -v
+      - name: Check frontend syntax
+        run: |
+          python - <<'PY'
+          import re
+          from pathlib import Path
+          html = Path('index.html').read_text(encoding='utf8')
+          scripts = re.findall(r'<script(?:\s[^>]*)?>([\s\S]*?)</script>', html)
+          assert scripts, 'No inline script found'
+          for i, js in enumerate(scripts):
+              Path(f'/tmp/stockradar_{i}.js').write_text(js, encoding='utf8')
+          print(f'Checking {len(scripts)} inline JavaScript scripts')
+          PY
+          for f in /tmp/stockradar_*.js; do node --check "$f"; done

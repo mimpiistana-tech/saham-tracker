@@ -8,6 +8,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from movers import build_mover
 from idx_ca import fetch_idx_announcements, IDX_LIST
 from ksei_ca import fetch_ksei_reminders
+from ksei_equities import fetch_ksei_shares, annotate_reminders, SHARES_URL
 
 from radar_score import (
     score_from_broker_rows,
@@ -693,15 +694,46 @@ def ca_ksei():
         return response,200
     try:
         result=fetch_ksei_reminders()
+        events=result["events"]
+        directory_cache_key="ksei_registered_shares_v1"
+        equity_directory, directory_cache_status = cache_get(directory_cache_key,max_age=24*3600)
+        directory_status="UNAVAILABLE"
+        directory_error=None
+        verified_count=0
+        if equity_directory is not None and directory_cache_status=="HIT":
+            directory_status="CACHED"
+            equities=equity_directory["data"]
+        else:
+            try:
+                equities=fetch_ksei_shares()
+                cache_put(directory_cache_key,equities,200)
+                directory_status="FRESH"
+            except (requests.RequestException,RuntimeError,ValueError,TypeError) as exc:
+                equities=None
+                directory_error=str(exc)[:160]
+        if equities is not None:
+            events=annotate_reminders(events,equities)
+            verified_count=sum(len(item["verified_equity_codes"]) for item in events)
+        else:
+            events=[
+                {**item,"verified_equity_codes":[],"other_unverified_codes":item.get("candidate_tickers",[]),
+                 "ticker":None,"ticker_verified":False,"ticker_directory_checked":False,
+                 "detail_verified":False,"buy_signal":False}
+                for item in events
+            ]
         payload={
             "success":True,"status":"SECONDARY_REMINDERS",
             "source":"KSEI","source_url":result["source_url"],
             "fetched_rows":result["fetched_rows"],
             "latest_publication":result["latest_publication"],
-            "events":result["events"],"event_count":len(result["events"]),
+            "events":events,"event_count":len(events),
+            "equity_directory_status":directory_status,
+            "equity_directory_source":SHARES_URL,
+            "equity_directory_error":directory_error,
+            "verified_equity_mentions":verified_count,
             "fetched_at_utc":datetime.utcnow().isoformat()+"Z",
             "buy_signal":False,"initial_disclosure":False,
-            "note":"KSEI adalah pengingat sekunder, BUKAN pengumuman awal/indikasi BUY."
+            "note":"KSEI adalah pengingat sekunder, BUKAN pengumuman awal/indikasi BUY. Kode saham divalidasi terpisah."
         }
         cache_put(key,payload,200)
         response=jsonify(payload)

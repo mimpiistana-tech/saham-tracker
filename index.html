@@ -9687,13 +9687,30 @@ async function runAutoPaperWatch(){
     autoPaperBusy=false;
   }
 }
+const CA_ARCHIVE_KEY='stockradar-ca-last-success-v1';
+function keepCAArchive(html){
+  try{localStorage.setItem(CA_ARCHIVE_KEY,JSON.stringify({saved_at:new Date().toISOString(),html}));}catch(e){}
+}
+function caArchiveOnFailure(box,reason){
+  let cached=null;
+  try{cached=JSON.parse(localStorage.getItem(CA_ARCHIVE_KEY)||'null');}catch(e){}
+  if(cached && typeof cached.html==='string' && cached.html.length<150000 &&
+      cached.saved_at && !isNaN(Date.parse(cached.saved_at))){
+    // HTML is only ever produced by this app's own escaped, source-linked renderer.
+    box.innerHTML='<div class="note">⚠️ WAIT_DATA: '+caHtmlEscape(reason)
+      +'. Menampilkan ARSIP, bukan pengumuman baru. Terakhir tersimpan: '
+      +caHtmlEscape(cached.saved_at)+'. Data dapat kedaluwarsa. Jangan gunakan sebagai sinyal BUY.</div>'
+      +cached.html;
+  }else{
+    box.textContent='⚠️ WAIT_DATA: '+reason+'. Belum ada arsip yang tersimpan. Tidak berarti tidak ada CA.';
+  }
+}
 async function loadKSEIBackup(box){
   try{
     const response=await fetch(STOCKRADAR_API_BASE+'/api/ca-ksei',{cache:'no-store'});
     const data=await response.json();
     if(!response.ok || !data.success){
-      box.textContent='⚠️ WAIT_DATA: BEI tidak bisa diakses; KSEI juga belum tersedia ('+
-        String(data.error||'HTTP '+response.status)+'). Tidak bisa menyimpulkan ada/tidak ada CA.';
+      caArchiveOnFailure(box,'BEI ditolak; KSEI belum tersedia ('+String(data.error||'HTTP '+response.status)+')');
       return;
     }
     const safe=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -9720,8 +9737,9 @@ async function loadKSEIBackup(box){
       +(grouped.length?'<h3>📚 Pengumuman gabungan / kode berbagai jenis efek</h3>'+grouped.slice(0,8).map(card).join(''):'')
       +(other.length?'<h3>🗂️ Pengingat umum</h3>'+other.slice(0,6).map(card).join(''):'')
       +(!rows.length?'<div class="note">Belum ada pengingat dalam jendela waktu. Bukan bukti tidak ada CA.</div>':'');
+    keepCAArchive(box.innerHTML);
   }catch(e){
-    box.textContent='⚠️ WAIT_DATA: BEI dan cadangan KSEI belum dapat diakses. Tidak ada data terverifikasi.';
+    caArchiveOnFailure(box,'BEI dan KSEI gagal dihubungi');
   }
 }
 

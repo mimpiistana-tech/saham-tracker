@@ -7,6 +7,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from movers import build_mover
 from idx_ca import fetch_idx_announcements, IDX_LIST
+from ksei_ca import fetch_ksei_reminders
 
 from radar_score import (
     score_from_broker_rows,
@@ -679,6 +680,38 @@ def build_scanner_reason(item):
 
     return ", ".join(reasons) + "; " + action_note
 
+
+
+@app.route("/api/ca-ksei")
+def ca_ksei():
+    """Secondary KSEI reminder feed only; no claim of earliest corporate action."""
+    key="ksei_ca_reminders_v1"
+    cached,state=cache_get(key,max_age=15*60)
+    if cached and state=="HIT":
+        response=jsonify(cached["data"])
+        response.headers["X-StockRadar-Cache"]="HIT"
+        return response,200
+    try:
+        result=fetch_ksei_reminders()
+        payload={
+            "success":True,"status":"SECONDARY_REMINDERS",
+            "source":"KSEI","source_url":result["source_url"],
+            "fetched_rows":result["fetched_rows"],
+            "latest_publication":result["latest_publication"],
+            "events":result["events"],"event_count":len(result["events"]),
+            "fetched_at_utc":datetime.utcnow().isoformat()+"Z",
+            "buy_signal":False,"initial_disclosure":False,
+            "note":"KSEI adalah pengingat sekunder, BUKAN pengumuman awal/indikasi BUY."
+        }
+        cache_put(key,payload,200)
+        response=jsonify(payload)
+        response.headers["X-StockRadar-Cache"]="MISS"
+        return response,200
+    except (requests.RequestException,RuntimeError,ValueError,TypeError) as exc:
+        return jsonify({"success":False,"status":"SOURCE_UNAVAILABLE",
+            "source":"KSEI","source_url":"https://web.ksei.co.id/ksei_news/browse",
+            "events":[],"error":str(exc)[:200],
+            "buy_signal":False,"initial_disclosure":False}),503
 
 
 @app.route("/api/ca-discovery")

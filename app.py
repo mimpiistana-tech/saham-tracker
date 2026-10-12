@@ -70,7 +70,14 @@ def add_cors_headers(response):
 @app.route("/")
 def home():
     with open("index.html", encoding="utf-8") as f:
-        return f.read()
+        html = f.read()
+    response = app.make_response(html)
+    # Prevent an old browser HTML document from retaining the pre-fix
+    # Stockbit confirmation handler across staging releases.
+    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    response.headers["Pragma"] = "no-cache"
+    response.headers["Expires"] = "0"
+    return response
 
 
 def cache_get(key, max_age=CACHE_TTL):

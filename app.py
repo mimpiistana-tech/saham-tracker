@@ -3316,7 +3316,26 @@ def analyze_5m_bounce(candles, now_ts):
     age = max(0,now_ts-(latest["timestamp"]+300))
     volumes = [item["volume"] for item in completed[-12:-2]]
     avg_vol = sum(volumes)/len(volumes) if volumes else 0
-    vol_ratio = latest["volume"]/avg_vol if avg_vol > 0 else None
+    positive_bars = sum(1 for v in volumes if v > 0)
+
+    # A zero-volume candle may be true inactivity or a missing Yahoo field.
+    # Neither is sufficient evidence for a trade confirmation.
+    if latest["volume"] <= 0 or avg_vol <= 0 or positive_bars < 8:
+        return {
+            **base,
+            "status": "WAIT_DATA",
+            "age_seconds": age,
+            "checks": {
+                "bar_terbaru_max15m": age <= 15 * 60,
+                "volume_5m_tersedia": False,
+            },
+            "reason": (
+                "Volume 5m kosong/nol atau histori volume tidak memadai. "
+                "Tidak dapat memvalidasi pantulan. Cek volume langsung di Stockbit."
+            ),
+        }
+
+    vol_ratio = latest["volume"]/avg_vol
     green = latest["close"] > latest["open"]
     high_break = latest["close"] > previous["high"]
     higher_low = latest["low"] >= previous["low"]

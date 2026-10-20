@@ -9634,6 +9634,24 @@ function autoPaperSelectCandidates(results){
         Number(b.score||0)-Number(a.score||0);
     }).slice(0,3);
 }
+// Fail closed: an old scanner cache must never be paired with today's 5m bounce.
+function autoPaperScanFresh(date,stored,nowMs=Date.now()){
+  const today=new Intl.DateTimeFormat('en-CA',{
+    timeZone:'Asia/Jakarta',year:'numeric',month:'2-digit',day:'2-digit'
+  }).format(new Date(nowMs));
+  const savedAt=Number(stored?.savedAt);
+  const data=stored?.data;
+  const generated=String(data?.generated_at_wib||'');
+  // Scanner backend uses "YYYY-MM-DD HH:mm:ss" in WIB.
+  const generatedAt=/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(generated)
+    ? Date.parse(generated.replace(' ','T')+'+07:00') : NaN;
+  const recent=ts=>Number.isFinite(ts)&&ts>0&&ts<=nowMs+60000
+    &&nowMs-ts<=30*60*1000;
+  return date===today&&data?.success===true&&data.date===date
+    &&data.candle_policy==='COMPLETED_DAILY_ONLY'
+    &&data.market_data_is_live===false&&Array.isArray(data.results)
+    &&recent(savedAt)&&recent(generatedAt);
+}
 let autoPaperBusy=false;
 async function runAutoPaperWatch(){
   const box=document.getElementById('autoPaperWatchStatus');
@@ -9643,7 +9661,11 @@ async function runAutoPaperWatch(){
     const date=document.getElementById('dateInput')?.value;
     const full=getScannerStored('full',date), quick=getScannerStored('quick',date);
     const stored=(full?.savedAt||0)>=(quick?.savedAt||0)?full:quick;
-    const items=autoPaperSelectCandidates(stored?.data?.results);
+    if(!autoPaperScanFresh(date,stored)){
+      if(box)box.textContent='⏳ WAIT_DATA: hasil scanner lama, tidak lengkap, atau belum segar. Jalankan Scan Cepat/Lengkap untuk tanggal WIB hari ini. Tidak ada paper OPEN.';
+      return;
+    }
+    const items=autoPaperSelectCandidates(stored.data.results);
     if(!items.length){
       if(box)box.textContent='Belum ada kandidat. Scan Cepat atau Lengkap dahulu.';
       return;

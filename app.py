@@ -3881,6 +3881,12 @@ def radar_test():
     })
 
 
-# Watchlist-only thread; starts only when explicitly enabled in Render.\nfrom server_scan import start as start_watch_scan\nstart_watch_scan(scan_one_ticker)\n\n\nif __name__ == "__main__":
+# Watchlist-only worker; intentionally no broker orders or paper fills.
+# Executed on Gunicorn worker import when AUTO_SCAN_ENABLED=1.
+from server_scan import start as start_watch_scan
+start_watch_scan(scan_one_ticker)
+
+
+if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)

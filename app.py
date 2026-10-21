@@ -4298,6 +4298,32 @@ def radar_test():
     })
 
 
+
+@app.route("/api/auto-paper/evaluate", methods=["POST"])
+def auto_paper_evaluate():
+    """PAPER-ONLY validation API; does not open positions or place orders."""
+    from datetime import datetime, timezone
+    from auto_paper_rules import evaluate_paper_candidate
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        return jsonify({"success": False, "error": "JSON object required"}), 400
+    decision = evaluate_paper_candidate(
+        payload.get("candidate"), payload.get("bar"),
+        now_iso=datetime.now(timezone.utc).isoformat())
+    return jsonify({"success": True, **decision, "auto_entry_enabled": False,
+                    "journal_persistent": False, "broker_order_enabled": False})
+
+
+@app.route("/api/auto-paper/status")
+def auto_paper_status():
+    """Expose real readiness, not a misleading AUTO label."""
+    return jsonify({"success": True, "paper_only": True,
+                    "candidate_validation": True, "auto_scan": False,
+                    "auto_entry": False, "auto_exit": False,
+                    "persistent_journal": False, "scheduler": False,
+                    "reason": "Persistent storage and scheduled worker not configured"})
+
+
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)

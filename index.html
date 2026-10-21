@@ -1285,6 +1285,12 @@ berapa persen mesin yang sudah aktif.
 <section id="paper" class="section">
   <div class="card">
     <h2>🧪 Paper Trade</h2>
+    <div class="card" style="margin:12px 0;background:#0c2031;border:1px solid #31516b">
+      <h3 style="margin:0 0 8px">📡 Status Mesin Auto Paper (Server)</h3>
+      <div class="small" id="autoPaperServerStatus" aria-live="polite">Memeriksa status server...</div>
+      <button class="refresh" onclick="refreshAutoPaperServerStatus()" style="margin-top:10px">🔄 Cek Mesin Sekarang</button>
+      <div class="small" style="margin-top:8px">Ini status server, terpisah dari posisi simulasi yang tersimpan di HP. Tidak ada order uang asli.</div>
+    </div>
     <div class="note">
       Simulasi tanpa uang asli. Harga dipantau dari Yahoo Finance untuk menguji konsistensi StockRadar.
     </div>
@@ -10241,7 +10247,37 @@ updateNotificationStatus();
 updateAlertBadge();
 renderAlerts();
 setupBackgroundMonitor();
+refreshAutoPaperServerStatus();
 importBackgroundAlerts();
+
+
+async function refreshAutoPaperServerStatus(){
+  const target=document.getElementById('autoPaperServerStatus');
+  if(!target)return;
+  target.textContent='Menghubungi mesin server...';
+  const ctl=new AbortController();
+  const timeout=setTimeout(()=>ctl.abort(),12000);
+  try{
+    const response=await fetch(
+      'https://saham-tracker-api.onrender.com/api/auto-paper/status',
+      {cache:'no-store',signal:ctl.signal}
+    );
+    if(!response.ok)throw new Error('HTTP '+response.status);
+    const state=await response.json();
+    if(state.success!==true||state.paper_only!==true)throw new Error('Respons tidak valid');
+    const stamp=state.checked_at ? new Date(state.checked_at).toLocaleString('id-ID',{timeZone:'Asia/Jakarta'})+' WIB' : '–';
+    target.textContent=
+      '✅ Backend terhubung ('+stamp+')\n'+
+      (state.scheduler?'✅':'⏳')+' Scan otomatis server: '+(state.scheduler&&state.auto_scan?'aktif':'belum aktif')+'\n'+
+      (state.auto_entry?'✅':'⏳')+' Entry paper otomatis: '+(state.auto_entry?'aktif':'belum aktif')+'\n'+
+      (state.auto_exit?'✅':'⏳')+' TP/SL paper otomatis: '+(state.auto_exit?'aktif':'belum aktif')+'\n'+
+      (state.persistent_journal?'✅':'⏳')+' Penyimpanan permanen: '+(state.persistent_journal?'aktif':'belum aktif')+'\n'+
+      '🔒 Order broker uang asli: '+(state.broker_order_enabled?'PERLU DITINJAU':'nonaktif');
+    target.style.whiteSpace='pre-line';
+  }catch(e){
+    target.textContent='⚠️ Status mesin belum dapat dibaca. '+(e.name==='AbortError'?'Server terlalu lama merespons.':'Periksa koneksi atau deploy.');
+  }finally{clearTimeout(timeout);}
+}
 
 let paperAutoMonitorBusy = false;
 

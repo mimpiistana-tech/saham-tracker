@@ -13,6 +13,8 @@ class PaperSafetyTests(unittest.TestCase):
         self.db = os.path.join(self.tmp.name, "paper.sqlite3")
         self.patcher = patch.dict(os.environ, {"AUTO_PAPER_DB_PATH": self.db})
         self.patcher.start()
+        self.storage_patch = patch("paper_storage.storage_health", return_value={"ready": True, "reason": "test_mount"})
+        self.storage_patch.start()
         self.now = datetime.now(timezone.utc)
         self.end = self.now - timedelta(seconds=30)
         self.bar = {"end_iso": self.end.isoformat(), "completed": True,
@@ -20,6 +22,7 @@ class PaperSafetyTests(unittest.TestCase):
         self.candidate = {"ticker": "BBRI", "entry_low": 99, "entry_high": 101,
                           "cut_loss": 95, "tp1": 106, "tp2": 112}
     def tearDown(self):
+        self.storage_patch.stop()
         self.patcher.stop()
         self.tmp.cleanup()
     def test_gate_rejects_stale_and_incomplete(self):
@@ -41,7 +44,7 @@ class PaperSafetyTests(unittest.TestCase):
         self.assertEqual(updated[0]["status"], "CL")
         self.assertEqual(paper_advance("BBRI", next_bar)["updated"], [])
     def test_fail_closed_without_storage(self):
-        with patch.dict(os.environ, {}, clear=True):
+        with patch("paper_storage.storage_health", return_value={"ready": False, "reason": "durable_disk_not_configured"}):
             with self.assertRaises(RuntimeError):
                 paper_list()
 

@@ -10286,7 +10286,7 @@ async function refreshAutoPaperServerStatus(){
     }
     target.textContent=
       '✅ Backend terhubung ('+stamp+')\n'+
-      (state.scheduler?'✅':'⏳')+' Scan otomatis server: '+(state.scheduler&&state.auto_scan?'aktif':'belum aktif')+'\n'+
+      (state.auto_scan?'✅':'⏳')+' Scan pantauan harian server: '+(state.auto_scan?'aktif':'belum aktif')+'\n'+
       (state.auto_entry?'✅':'⏳')+' Entry paper otomatis: '+(state.auto_entry?'aktif':'belum aktif')+'\n'+
       (state.auto_exit?'✅':'⏳')+' TP/SL paper otomatis: '+(state.auto_exit?'aktif':'belum aktif')+'\n'+
       (state.persistent_journal?'✅':'⏳')+' Penyimpanan permanen: '+(state.persistent_journal?'aktif':'belum aktif')+'\n'+

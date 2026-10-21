@@ -3887,9 +3887,22 @@ def radar_test():
 from server_scan import start as start_watch_scan
 
 
+def _daily_paper_bars(ticker, cutoff):
+    payload, code, _ = get_ohlcv(ticker, cutoff)
+    if code != 200:
+        return []
+    return extract_ohlcv_rows(payload)
+
+
+def _run_paper_from_watch(items, cutoff):
+    from daily_paper_runner import run_cycle
+    from server_scan import WATCH
+    run_cycle(items, cutoff, _daily_paper_bars, watch=WATCH)
+
+
 @app.before_request
 def bootstrap_watch_scan_in_http_worker():
-    start_watch_scan(scan_one_ticker)
+    start_watch_scan(scan_one_ticker, _run_paper_from_watch)
 
 
 if __name__ == "__main__":

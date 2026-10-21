@@ -41,7 +41,7 @@ def due(now, last_date):
     return (local.weekday() < 5 and RUN_AFTER <= clock < RUN_BEFORE
             and local.date().isoformat() != last_date)
 
-def _run_once(scan_one, now):
+def _run_once(scan_one, now, on_scan=None):
     """One bounded watchlist scan; never creates a trading position."""
     global _last_date, _last_attempt_at
     if now.tzinfo is None:
@@ -84,6 +84,11 @@ def _run_once(scan_one, now):
         except Exception:
             failures += 1
     ranked.sort(key=lambda entry: entry[0], reverse=True)
+    if on_scan is not None:
+        try:
+            on_scan([item for _, item in ranked], closed_until)
+        except Exception as exc:
+            print("[StockRadar Auto Paper] callback error: "+type(exc).__name__, flush=True)
 
     watch = [
         {"ticker": row["ticker"], "score": round(score, 1),
@@ -107,17 +112,17 @@ def _run_once(scan_one, now):
             _last_date = today
     return True
 
-def _loop(scan_one):
+def _loop(scan_one, on_scan=None):
     # Run immediately (helpful if new deployment starts inside the scan window).
     while not _stop.is_set():
         try:
-            _run_once(scan_one, datetime.now(timezone.utc))
+            _run_once(scan_one, datetime.now(timezone.utc), on_scan)
         except Exception as exc:
             with _lock:
                 _state["last_error"] = "Scan preview gagal: " + type(exc).__name__
         _stop.wait(30)
 
-def start(scan_one):
+def start(scan_one, on_scan=None):
     """Run once per Gunicorn worker. Render currently uses one worker."""
     global _worker
     if os.environ.get("AUTO_SCAN_ENABLED", "").strip() != "1":
@@ -127,7 +132,7 @@ def start(scan_one):
         if _worker and _worker.is_alive():
             return True
         _stop.clear()
-        _worker = threading.Thread(target=_loop, args=(scan_one,),
+        _worker = threading.Thread(target=_loop, args=(scan_one,on_scan),
                                    name="stockradar-watch-scan", daemon=True)
         _worker.start()
         print("[StockRadar Watch] worker_started=" + str(_worker.is_alive()), flush=True)

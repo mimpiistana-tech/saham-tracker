@@ -22,6 +22,8 @@ jobs:
       - run: python -m unittest discover -s tests -p 'test_paper_disk_probe.py' -v
       - run: python -m unittest discover -s tests -p 'test_server_scan_schedule.py' -v
       - run: python -m unittest discover -s tests -p 'test_scan_bootstrap.py' -v
+      - run: python -m unittest discover -s tests -p 'test_daily_paper_logic.py' -v
+      - run: python -m unittest discover -s tests -p 'test_daily_paper_runner.py' -v
       - name: Validate frontend syntax
         run: |
           python - <<'PY'

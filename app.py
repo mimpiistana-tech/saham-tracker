@@ -15,6 +15,10 @@ from radar_score import (
 
 app = Flask(__name__)
 
+# Read-only paper machine readiness (no order or scheduler side effects).
+from paper_api import paper_api
+app.register_blueprint(paper_api)
+
 API_KEY = os.environ.get("INDEXALPHA_API_KEY")
 BASE_URL = "https://api.indexalpha.id"
 CACHE = {}

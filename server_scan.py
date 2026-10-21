@@ -84,7 +84,7 @@ def _run_once(scan_one, now, on_scan=None):
         except Exception:
             failures += 1
     ranked.sort(key=lambda entry: entry[0], reverse=True)
-    if on_scan is not None and ranked:
+    if on_scan is not None:
         try:
             on_scan([item for _, item in ranked], closed_until)
         except Exception as exc:

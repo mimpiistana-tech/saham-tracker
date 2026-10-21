@@ -3881,10 +3881,15 @@ def radar_test():
     })
 
 
-# Watchlist-only worker; intentionally no broker orders or paper fills.
-# Executed on Gunicorn worker import when AUTO_SCAN_ENABLED=1.
+# The Flask module may be imported before Gunicorn forks its HTTP workers.
+# Start the watch thread inside the request-serving process, never in the master.
+# This does not create broker orders or simulated positions.
 from server_scan import start as start_watch_scan
-start_watch_scan(scan_one_ticker)
+
+
+@app.before_request
+def bootstrap_watch_scan_in_http_worker():
+    start_watch_scan(scan_one_ticker)
 
 
 if __name__ == "__main__":

@@ -4314,6 +4314,46 @@ def auto_paper_evaluate():
                     "journal_persistent": False, "broker_order_enabled": False})
 
 
+@app.route("/api/auto-paper/trades", methods=["GET"])
+def auto_paper_trades():
+    """Read persistent paper journal; fail closed when disk not configured."""
+    from auto_paper_journal import paper_list
+    try:
+        return jsonify({"success": True, **paper_list()})
+    except (RuntimeError, OSError) as exc:
+        return jsonify({"success": False, "error": str(exc)}), 503
+
+
+@app.route("/api/auto-paper/advance", methods=["POST"])
+def auto_paper_advance():
+    """Manual staging test of a completed candle; NOT a background scheduler."""
+    from auto_paper_journal import paper_advance
+    if os.environ.get("AUTO_PAPER_WRITE_ENABLED") != "1":
+        return jsonify({"success": False, "error": "paper writes disabled"}), 503
+    payload = request.get_json(silent=True) or {}
+    if not isinstance(payload, dict) or not isinstance(payload.get("candle"), dict):
+        return jsonify({"success": False, "error": "candle required"}), 400
+    try:
+        return jsonify({"success": True, **paper_advance(payload.get("ticker", ""), payload["candle"])})
+    except (RuntimeError, OSError) as exc:
+        return jsonify({"success": False, "error": str(exc)}), 503
+
+
+@app.route("/api/auto-paper/open", methods=["POST"])
+def auto_paper_open():
+    """Manual staging test of validated paper entry; NEVER sends broker orders."""
+    from auto_paper_journal import paper_open
+    if os.environ.get("AUTO_PAPER_WRITE_ENABLED") != "1":
+        return jsonify({"success": False, "error": "paper writes disabled"}), 503
+    payload = request.get_json(silent=True) or {}
+    if not isinstance(payload, dict):
+        return jsonify({"success": False, "error": "object required"}), 400
+    try:
+        return jsonify({"success": True, **paper_open(payload.get("candidate"), payload.get("bar"))})
+    except (RuntimeError, OSError) as exc:
+        return jsonify({"success": False, "error": str(exc)}), 503
+
+
 @app.route("/api/auto-paper/status")
 def auto_paper_status():
     """Expose real readiness, not a misleading AUTO label."""

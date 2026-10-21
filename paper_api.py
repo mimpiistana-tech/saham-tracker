@@ -16,6 +16,8 @@ def status():
     storage = storage_health()
     from server_scan import status as scan_status
     scan = scan_status()
+    from paper_disk_probe import probe_database
+    probe = probe_database()
     return jsonify(
         success=True,
         paper_only=True,
@@ -29,7 +31,11 @@ def status():
         scheduler=False,
         journal_path_configured=bool(os.environ.get("AUTO_PAPER_DB_PATH")),
         storage_check=storage["reason"],
-        persistent_journal=storage["ready"],
+        database_write_verified=probe["write_verified"],
+        database_survived_restart=probe["retained_from_previous_process"],
+        database_survived_deploy=probe["retained_across_code_deploy"],
+        database_probe_status=probe["reason"],
+        persistent_journal=storage["ready"] and probe["write_verified"],
         broker_order_enabled=False,
         note="Preview dari candle harian terakhir yang telah selesai; bukan sinyal entry. Jurnal permanen dan auto paper entry/exit belum aktif."
     )

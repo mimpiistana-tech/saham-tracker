@@ -5,6 +5,11 @@ import time
 from datetime import datetime, timedelta
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
+from movers import build_mover
+from idx_ca import fetch_idx_announcements, IDX_LIST
+from ksei_ca import fetch_ksei_reminders
+from ksei_equities import fetch_ksei_shares, annotate_reminders, SHARES_URL
+
 from radar_score import (
     score_from_broker_rows,
     score_from_market_data,
@@ -47,6 +52,16 @@ SCANNER_UNIVERSE = [
     "GIAA", "ASSA", "WEHA", "TMAS", "SMDR", "WINS", "HATM",
     # Media, tourism, lifestyle & newer stories
     "SCMA", "MNCN", "BMTR", "FILM", "RAAM", "RANS", "NAYZ", "PIPA", "RICY", "MEJA",
+    "VIVA", "DOOH", "STRK",
+]
+
+# V2 Quick Scan hanya memproses 20 saham pilihan agar tidak menunggu full universe.
+# Ini watchlist teknikal, BUKAN data live / rekomendasi BUY otomatis.
+QUICK_SCAN_UNIVERSE = [
+    "BBCA", "BBRI", "BMRI", "TLKM", "ASII",
+    "UNTR", "ANTM", "PTBA", "ADRO", "BRMS",
+    "ERAA", "PANI", "PWON", "GOTO", "NAYZ",
+    "PIPA", "RANS", "MEJA", "ARCI", "ADMR",
 ]
 
 
@@ -61,10 +76,17 @@ def add_cors_headers(response):
 @app.route("/")
 def home():
     with open("index.html", encoding="utf-8") as f:
-        return f.read()
+        html = f.read()
+    response = app.make_response(html)
+    # Prevent an old browser HTML document from retaining the pre-fix
+    # Stockbit confirmation handler across staging releases.
+    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    response.headers["Pragma"] = "no-cache"
+    response.headers["Expires"] = "0"
+    return response
 
 
-def cache_get(key):
+def cache_get(key, max_age=CACHE_TTL):
     cached = CACHE.get(key)
 
     if not cached:
@@ -72,7 +94,7 @@ def cache_get(key):
 
     age = time.time() - cached["time"]
 
-    if age < CACHE_TTL:
+    if age < max_age:
         return cached, "HIT"
 
     return cached, "STALE"
@@ -275,7 +297,11 @@ def get_ohlcv(ticker, date_to):
     symbol = f"{ticker}.JK"
 
     cache_key = f"yahoo_ohlcv_{symbol}_{start_date.isoformat()}_{end_date.isoformat()}"
-    cached, cache_state = cache_get(cache_key)
+
+    # OHLCV harian pada sesi berjalan dapat berubah: jangan gunakan cache 24 jam.
+    today_wib = (datetime.utcnow() + timedelta(hours=7)).date()
+    ttl = 10 * 60 if end_date >= today_wib else CACHE_TTL
+    cached, cache_state = cache_get(cache_key, max_age=ttl)
 
     if cached and cache_state == "HIT":
         return cached["data"], cached["status"], "HIT"
@@ -572,13 +598,41 @@ def build_scanner_item_from_rows(ticker, rows, cache_state="HIST"):
     }
 
 
+def scanner_closed_cutoff(date_to, now_wib=None):
+    """Last calendar date whose daily candle may be used for live scanner signals.
+
+    The current IDX session is never used before 17:00 WIB: conservative buffer
+    after regular-market closing, without claiming Yahoo has finalized the bar.
+    """
+    requested = datetime.strptime(date_to, "%Y-%m-%d").date()
+    now_wib = now_wib or (datetime.utcnow() + timedelta(hours=7))
+    if requested >= now_wib.date() and now_wib.hour < 17:
+        return now_wib.date() - timedelta(days=1)
+    return requested
+
+
+def scanner_completed_rows(rows, date_to, now_wib=None):
+    cutoff = scanner_closed_cutoff(date_to, now_wib=now_wib)
+    result = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        try:
+            session = datetime.strptime(str(row.get("date")), "%Y-%m-%d").date()
+        except (ValueError, TypeError):
+            continue
+        if session <= cutoff:
+            result.append(row)
+    return result
+
+
 def scan_one_ticker(ticker, date_to):
     data, status, cache_state = get_ohlcv(ticker, date_to)
 
     if status != 200:
         return None
 
-    rows = extract_ohlcv_rows(data)
+    rows = scanner_completed_rows(extract_ohlcv_rows(data), date_to)
 
     return build_scanner_item_from_rows(
         ticker,
@@ -628,9 +682,193 @@ def build_scanner_reason(item):
     return ", ".join(reasons) + "; " + action_note
 
 
+
+@app.route("/api/ca-ksei")
+def ca_ksei():
+    """Secondary KSEI reminder feed only; no claim of earliest corporate action."""
+    key="ksei_ca_reminders_v1"
+    cached,state=cache_get(key,max_age=15*60)
+    if cached and state=="HIT":
+        response=jsonify(cached["data"])
+        response.headers["X-StockRadar-Cache"]="HIT"
+        return response,200
+    try:
+        result=fetch_ksei_reminders()
+        events=result["events"]
+        directory_cache_key="ksei_registered_shares_v1"
+        equity_directory, directory_cache_status = cache_get(directory_cache_key,max_age=24*3600)
+        directory_status="UNAVAILABLE"
+        directory_error=None
+        verified_count=0
+        if equity_directory is not None and directory_cache_status=="HIT":
+            directory_status="CACHED"
+            equities=equity_directory["data"]
+        else:
+            try:
+                equities=fetch_ksei_shares()
+                cache_put(directory_cache_key,equities,200)
+                directory_status="FRESH"
+            except (requests.RequestException,RuntimeError,ValueError,TypeError) as exc:
+                equities=None
+                directory_error=str(exc)[:160]
+        if equities is not None:
+            events=annotate_reminders(events,equities)
+            verified_count=sum(len(item["verified_equity_codes"]) for item in events)
+        else:
+            events=[
+                {**item,"verified_equity_codes":[],"other_unverified_codes":item.get("candidate_tickers",[]),
+                 "ticker":None,"ticker_verified":False,"ticker_directory_checked":False,
+                 "detail_verified":False,"buy_signal":False}
+                for item in events
+            ]
+        payload={
+            "success":True,"status":"SECONDARY_REMINDERS",
+            "source":"KSEI","source_url":result["source_url"],
+            "fetched_rows":result["fetched_rows"],
+            "latest_publication":result["latest_publication"],
+            "events":events,"event_count":len(events),
+            "equity_directory_status":directory_status,
+            "equity_directory_source":SHARES_URL,
+            "equity_directory_error":directory_error,
+            "verified_equity_mentions":verified_count,
+            "fetched_at_utc":datetime.utcnow().isoformat()+"Z",
+            "buy_signal":False,"initial_disclosure":False,
+            "note":"KSEI adalah pengingat sekunder, BUKAN pengumuman awal/indikasi BUY. Kode saham divalidasi terpisah."
+        }
+        cache_put(key,payload,200)
+        response=jsonify(payload)
+        response.headers["X-StockRadar-Cache"]="MISS"
+        return response,200
+    except (requests.RequestException,RuntimeError,ValueError,TypeError) as exc:
+        return jsonify({"success":False,"status":"SOURCE_UNAVAILABLE",
+            "source":"KSEI","source_url":"https://web.ksei.co.id/ksei_news/browse",
+            "events":[],"error":str(exc)[:200],
+            "buy_signal":False,"initial_disclosure":False}),503
+
+
+@app.route("/api/ca-discovery")
+def ca_discovery():
+    """Official IDX CA headline candidate discovery, WATCH ONLY."""
+    cache_key="idx_ca_discovery_v1"
+    cached,state=cache_get(cache_key,max_age=15*60)
+    if cached and state=="HIT":
+        response=jsonify(cached["data"])
+        response.headers["X-StockRadar-Cache"]="HIT"
+        return response,200
+    try:
+        result=fetch_idx_announcements()
+        payload={
+            "success":True,"source":"IDX","source_url":IDX_LIST,
+            "status":"OK" if result["fetched_rows"]>0 else "EMPTY_FEED",
+            "fetched_rows":result["fetched_rows"],
+            "events":result["events"],
+            "event_count":len(result["events"]),
+            "fetched_at_utc":datetime.utcnow().isoformat()+"Z",
+            "monitoring_mode":"ON_DEMAND_PAGE_OPEN",
+            "coverage":"Halaman pertama, maksimum 100 pengumuman; tidak menjamin semua emiten tercakup.",
+            "note":"Deteksi judul pengumuman saja; dokumen, jadwal, besaran aksi, dan dampaknya belum diverifikasi. Bukan sinyal BUY.",
+            "buy_signal":False,
+        }
+        if result["fetched_rows"]<=0:
+            return jsonify({**payload,"success":False,
+                "error":"IDX tidak mengirim pengumuman; sumber belum dapat divalidasi."}),503
+        cache_put(cache_key,payload,200)
+        response=jsonify(payload)
+        response.headers["X-StockRadar-Cache"]="MISS"
+        return response,200
+    except (requests.RequestException,RuntimeError,ValueError,TypeError) as exc:
+        return jsonify({
+            "success":False,"status":"SOURCE_UNAVAILABLE",
+            "source":"IDX","source_url":IDX_LIST,"events":[],
+            "error":str(exc)[:200],
+            "buy_signal":False,
+            "note":"Pengumuman resmi belum dapat dibaca. Jangan menganggap tidak ada aksi korporasi.",
+        }),503
+
+
+@app.route("/api/movers")
+def movers():
+    """Movement watch only, Yahoo 5m indicative; never a BUY or paper order."""
+    mode = request.args.get("mode", "quick").strip().lower()
+    if mode not in {"quick", "full", "ca"}:
+        return jsonify({"success":False,"error":"mode harus quick, full atau ca"}),400
+    if mode == "ca":
+        raw = request.args.get("tickers", "")
+        supplied = raw.split(",") if raw else []
+        # Bounded custom ticker list: never permit arbitrary paths or mass requests.
+        if not supplied or len(supplied) > 15:
+            return jsonify({"success":False,"error":"Pantauan CA wajib 1-15 saham."}),400
+        cleaned = [item.strip().upper() for item in supplied]
+        if any(not (1 <= len(t) <= 7 and t.isascii() and t.isalnum()) for t in cleaned):
+            return jsonify({"success":False,"error":"Kode saham CA tidak valid."}),400
+        universe = list(dict.fromkeys(cleaned))
+    else:
+        universe = list(dict.fromkeys(QUICK_SCAN_UNIVERSE if mode=="quick" else SCANNER_UNIVERSE))
+    today_wib = (datetime.utcnow()+timedelta(hours=7)).date()
+    key = f"movers_{mode}_{today_wib.isoformat()}_{','.join(sorted(universe)) if mode == 'ca' else ''}"
+    cached, state = cache_get(key,max_age=120)
+    if cached and state=="HIT":
+        output=jsonify(cached["data"])
+        output.headers["X-StockRadar-Cache"]="HIT"
+        return output
+    now_ts=int(time.time())
+    def fetch_one(ticker):
+        try:
+            response=requests.get(
+                f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker}.JK",
+                params={"period1":now_ts-2*86400,"period2":now_ts+60,"interval":"5m"},
+                headers={"User-Agent":"Mozilla/5.0 StockRadar/2.0","accept":"application/json"},
+                timeout=12,
+            )
+            if response.status_code != 200:
+                return None, "HTTP_"+str(response.status_code)
+            result=((response.json().get("chart") or {}).get("result") or [None])[0]
+            return build_mover(ticker,result,now_ts)
+        except (requests.RequestException,ValueError,TypeError):
+            return None,"SOURCE_ERROR"
+    records=[]
+    failed={}
+    with ThreadPoolExecutor(max_workers=6) as executor:
+        future_map={executor.submit(fetch_one,ticker):ticker for ticker in universe}
+        for future in as_completed(future_map):
+            ticker=future_map[future]
+            try:
+                item,reason=future.result()
+            except Exception:
+                item,reason=None,"SOURCE_ERROR"
+            if item:
+                records.append(item)
+            else:
+                failed[reason or "UNKNOWN"]=failed.get(reason or "UNKNOWN",0)+1
+    records.sort(key=lambda item:item["change_pct"],reverse=True)
+    response_data={
+        "success":True,"mode":mode,"date_wib":today_wib.isoformat(),
+        "source":"Yahoo Finance 5m indicative (not verified real-time IDX)",
+        "universe_size":len(universe),"scanned":len(records),
+        "missing":len(universe)-len(records),"failure_reasons":failed,
+        "market_data_is_live":False,"signal":"WATCH_ONLY",
+        "note":"Pergerakan bukan sinyal BUY. Data dapat tertunda atau tidak tersedia; tidak mencakup seluruh BEI.",
+        "movers":records[:40],"rising":[item for item in records if item["change_pct"]>=1][:30],
+    }
+    cache_put(key,response_data,200)
+    output=jsonify(response_data)
+    output.headers["Cache-Control"]="no-store"
+    output.headers["X-StockRadar-Cache"]="MISS"
+    return output
+
+
 @app.route("/api/scanner")
 def scanner():
     date_to = request.args.get("to")
+    mode = request.args.get("mode", "full").strip().lower()
+
+    if mode not in {"quick", "full"}:
+        return jsonify({
+            "success": False,
+            "error": "mode harus quick atau full",
+        }), 400
+
+    universe = QUICK_SCAN_UNIVERSE if mode == "quick" else SCANNER_UNIVERSE
 
     if not date_to:
         return jsonify({
@@ -646,6 +884,17 @@ def scanner():
             "error": "Format tanggal harus YYYY-MM-DD",
         }), 400
 
+    # Repeated scans should return almost immediately without another 20-150 Yahoo requests.
+    today_wib = (datetime.utcnow() + timedelta(hours=7)).date()
+    selected_date = datetime.strptime(date_to, "%Y-%m-%d").date()
+    ttl = 10 * 60 if selected_date >= today_wib else CACHE_TTL
+    scanner_key = f"scanner_result_{mode}_{date_to}"
+    cached, cache_state = cache_get(scanner_key, max_age=ttl)
+    if cached and cache_state == "HIT":
+        response = jsonify(cached["data"])
+        response.headers["X-StockRadar-Cache"] = "HIT"
+        return response, cached["status"]
+
     results = []
 
     with ThreadPoolExecutor(max_workers=8) as executor:
@@ -655,7 +904,7 @@ def scanner():
                 ticker,
                 date_to,
             ): ticker
-            for ticker in SCANNER_UNIVERSE
+            for ticker in universe
         }
 
         for future in as_completed(futures):
@@ -715,19 +964,28 @@ def scanner():
         )
         top_picks.append(pick)
 
-    market_regime = get_current_market_regime(
-        date_to
-    )
+    cutoff_date = scanner_closed_cutoff(date_to)
+    market_regime = get_current_market_regime(cutoff_date.isoformat())
 
-    return jsonify({
+    result_data = {
         "success": True,
         "date": date_to,
         "source": "Yahoo Finance OHLCV",
+        "mode": mode,
+        "candle_policy": "COMPLETED_DAILY_ONLY",
+        "signal_cutoff_date": cutoff_date.isoformat(),
+        "generated_at_wib": (datetime.utcnow() + timedelta(hours=7)).strftime("%Y-%m-%d %H:%M:%S"),
+        "market_data_is_live": False,
         "market_regime": market_regime,
-        "universe_size": len(SCANNER_UNIVERSE),
+        "universe_size": len(universe),
         "scanned": len(results),
         "liquidity_filter": "avg value 20D >= Rp2B dan minimal 15 hari aktif",
-        "note": "Scanner V3 menampilkan Top 3 kandidat dari setup actionable, lalu Analisa Full dipakai untuk konfirmasi broker.",
+        "note": (
+            "Quick Scan V2 memproses 20 saham pilihan, bukan seluruh IDX. "
+            "Signal OHLCV bersifat harian; konfirmasi harga aktual di Stockbit."
+            if mode == "quick" else
+            "Full Scan V3 dari universe lebih luas; konfirmasi harga aktual di Stockbit."
+        ),
         "summary": {
             "momentum": len(groups["momentum"]),
             "pullback": len(groups["pullback"]),
@@ -738,7 +996,11 @@ def scanner():
         "top_picks": top_picks,
         "groups": groups,
         "results": actionable[:15],
-    })
+    }
+    cache_put(scanner_key, result_data, 200)
+    response = jsonify(result_data)
+    response.headers["X-StockRadar-Cache"] = "MISS"
+    return response
 
 
 def get_historical_ohlcv(ticker, date_to, calendar_days=1000):
@@ -3175,6 +3437,160 @@ def market_regime_validation():
 
 
 
+def analyze_5m_bounce(candles, now_ts):
+    """Conservative 5m confirmation from completed same-session candles only.
+
+    Data remains *indicative* Yahoo market data, not an execution signal.
+    Candle timestamps represent starts, so exclude the unfinished bar.
+    """
+    today_wib = (datetime.utcfromtimestamp(now_ts) + timedelta(hours=7)).date()
+    completed = []
+    for item in candles:
+        try:
+            start = int(item["timestamp"])
+            opened = float(item["open"])
+            high = float(item["high"])
+            low = float(item["low"])
+            close = float(item["close"])
+            volume = float(item["volume"])
+        except (KeyError, TypeError, ValueError, OverflowError):
+            continue
+        if not all(v > 0 for v in (opened, high, low, close)):
+            continue
+        if volume < 0 or high < low or not (low <= opened <= high) or not (low <= close <= high):
+            continue
+        candle_day = (datetime.utcfromtimestamp(start) + timedelta(hours=7)).date()
+        if candle_day != today_wib or start + 300 + 30 > now_ts:
+            continue
+        completed.append({"timestamp":start, "open":opened, "high":high,
+                          "low":low, "close":close, "volume":volume})
+
+    completed.sort(key=lambda row:row["timestamp"])
+    # Yahoo occasionally returns duplicate timestamps; retain the most recent.
+    by_start = {item["timestamp"]:item for item in completed}
+    completed = list(by_start.values())
+    last = completed[-1] if completed else None
+    base = {
+        "source":"Yahoo Finance 5m (indikatif, dapat tertunda)",
+        "live_trade_allowed":False,
+        "candle_count":len(completed),
+        "bar_start_wib": (
+            (datetime.utcfromtimestamp(last["timestamp"]) + timedelta(hours=7))
+            .strftime("%Y-%m-%d %H:%M:%S")
+            if last else None
+        ),
+        "bar_end_wib": (
+            (datetime.utcfromtimestamp(last["timestamp"] + 300) + timedelta(hours=7))
+            .strftime("%Y-%m-%d %H:%M:%S")
+            if last else None
+        ),
+        "checks":{},
+        "price_trigger":None,
+        "swing_low":None,
+        "volume_ratio":None,
+    }
+    if len(completed) < 12:
+        return {**base, "status":"WAIT_DATA",
+                "reason":"Belum cukup 12 candle 5m selesai pada sesi hari ini."}
+
+    previous, latest = completed[-2], completed[-1]
+    age = max(0,now_ts-(latest["timestamp"]+300))
+    volumes = [item["volume"] for item in completed[-12:-2]]
+    avg_vol = sum(volumes)/len(volumes) if volumes else 0
+    positive_bars = sum(1 for v in volumes if v > 0)
+
+    # A zero-volume candle may be true inactivity or a missing Yahoo field.
+    # Neither is sufficient evidence for a trade confirmation.
+    if latest["volume"] <= 0 or avg_vol <= 0 or positive_bars < 8:
+        return {
+            **base,
+            "status": "WAIT_DATA",
+            "age_seconds": age,
+            "checks": {
+                "bar_terbaru_max15m": age <= 15 * 60,
+                "volume_5m_tersedia": False,
+            },
+            "reason": (
+                "Volume 5m kosong/nol atau histori volume tidak memadai. "
+                "Tidak dapat memvalidasi pantulan. Cek volume langsung di Stockbit."
+            ),
+        }
+
+    vol_ratio = latest["volume"]/avg_vol
+    green = latest["close"] > latest["open"]
+    high_break = latest["close"] > previous["high"]
+    higher_low = latest["low"] >= previous["low"]
+    volume_ok = vol_ratio is not None and vol_ratio >= 1.3
+    recent = age <= 15 * 60
+    checks = {
+        "bar_terbaru_max15m":recent,
+        "candle_hijau":green,
+        "close_tembus_high_sebelumnya":high_break,
+        "higher_low":higher_low,
+        "volume_min_1_3x":volume_ok,
+    }
+    passed = all(checks.values())
+    status = ("BOUNCE_CONFIRMED" if passed else
+              "WAIT_DELAYED" if not recent else "WAIT_CONFIRMATION")
+    reason = (
+        "Pantulan, struktur HL dan volume tampak pada candle Yahoo 5m selesai. "
+        "Verifikasi sendiri di Stockbit sebelum pertimbangan paper."
+        if passed else
+        "Candle 5m Yahoo sudah terlalu lama; tunggu pembaruan dan cek Stockbit."
+        if not recent else
+        "Pantulan belum memenuhi semua syarat (candle hijau, tembus high, HL, volume 1,3x)."
+    )
+    return {
+        **base,"status":status,"reason":reason,
+        "age_seconds":age, "checks":checks,
+        "volume_ratio":round(vol_ratio,2) if vol_ratio is not None else None,
+        "price_trigger":round(previous["high"],2),
+        "swing_low":round(min(previous["low"],latest["low"]),2),
+        "last_completed_close":round(latest["close"],2),
+    }
+
+
+@app.route("/api/entry-timing")
+def entry_timing():
+    """READ-ONLY 5m timing check; uses Yahoo, never IndexAlpha or a broker order."""
+    ticker = request.args.get("ticker","").upper().strip()
+    if not ticker or len(ticker) > 7 or not ticker.isascii() or not ticker.isalnum():
+        return jsonify({"success":False,"error":"Ticker harus 1-7 huruf/angka."}),400
+
+    now_ts = int(time.time())
+    try:
+        response = requests.get(
+            f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker}.JK",
+            params={"period1":now_ts-2*24*3600,"period2":now_ts+60,
+                    "interval":"5m","events":"history"},
+            headers={"User-Agent":"Mozilla/5.0 StockRadar/2.0",
+                     "accept":"application/json"},
+            timeout=20,
+        )
+        if response.status_code != 200:
+            return jsonify({"success":False,
+                            "error":f"Yahoo 5m HTTP {response.status_code}"}),502
+        result = ((response.json().get("chart") or {}).get("result") or [None])[0]
+        if not result:
+            return jsonify({"success":False,"error":"Yahoo 5m belum tersedia"}),503
+        stamps = result.get("timestamp") or []
+        quote = (((result.get("indicators") or {}).get("quote") or [{}])[0])
+        keys = ("open","high","low","close","volume")
+        columns = {key:quote.get(key) or [] for key in keys}
+        candles = [
+            {"timestamp":stamp,**{key:(columns[key][i] if i < len(columns[key])
+                                   else None) for key in keys}}
+            for i,stamp in enumerate(stamps)
+        ]
+        analysis = analyze_5m_bounce(candles,now_ts)
+        response = jsonify({"success":True,"ticker":ticker,**analysis})
+        response.headers["Cache-Control"]="no-store"
+        return response
+    except (requests.RequestException,ValueError,TypeError) as error:
+        return jsonify({"success":False,
+                        "error":"Gagal membaca candle Yahoo 5m. Coba lagi."}),503
+
+
 @app.route("/api/live-quote")
 def live_quote():
     """
@@ -3271,8 +3687,13 @@ def live_quote():
                 "error": "Harga terbaru Yahoo tidak tersedia",
             }), 404
 
-        if price_ts <= 0:
-            price_ts = now_ts
+        # Never invent the quote timestamp: that would turn an undated price
+        # into a false FRESH price and could cause an unsafe paper entry.
+        if price_ts <= 0 or price_ts > now_ts + 60:
+            return jsonify({
+                "success": False,
+                "error": "Timestamp Yahoo tidak tersedia atau tidak valid. Jangan entry.",
+            }), 503
 
         age_seconds = max(0, now_ts - price_ts)
         jakarta_dt = (
@@ -3875,6 +4296,72 @@ def radar_test():
         "ticker": "TEST",
         "result": result,
     })
+
+
+
+@app.route("/api/auto-paper/evaluate", methods=["POST"])
+def auto_paper_evaluate():
+    """PAPER-ONLY validation API; does not open positions or place orders."""
+    from datetime import datetime, timezone
+    from auto_paper_rules import evaluate_paper_candidate
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        return jsonify({"success": False, "error": "JSON object required"}), 400
+    decision = evaluate_paper_candidate(
+        payload.get("candidate"), payload.get("bar"),
+        now_iso=datetime.now(timezone.utc).isoformat())
+    return jsonify({"success": True, **decision, "auto_entry_enabled": False,
+                    "journal_persistent": False, "broker_order_enabled": False})
+
+
+@app.route("/api/auto-paper/trades", methods=["GET"])
+def auto_paper_trades():
+    """Read persistent paper journal; fail closed when disk not configured."""
+    from auto_paper_journal import paper_list
+    try:
+        return jsonify({"success": True, **paper_list()})
+    except (RuntimeError, OSError) as exc:
+        return jsonify({"success": False, "error": str(exc)}), 503
+
+
+@app.route("/api/auto-paper/advance", methods=["POST"])
+def auto_paper_advance():
+    """Manual staging test of a completed candle; NOT a background scheduler."""
+    from auto_paper_journal import paper_advance
+    if os.environ.get("AUTO_PAPER_WRITE_ENABLED") != "1":
+        return jsonify({"success": False, "error": "paper writes disabled"}), 503
+    payload = request.get_json(silent=True) or {}
+    if not isinstance(payload, dict) or not isinstance(payload.get("candle"), dict):
+        return jsonify({"success": False, "error": "candle required"}), 400
+    try:
+        return jsonify({"success": True, **paper_advance(payload.get("ticker", ""), payload["candle"])})
+    except (RuntimeError, OSError) as exc:
+        return jsonify({"success": False, "error": str(exc)}), 503
+
+
+@app.route("/api/auto-paper/open", methods=["POST"])
+def auto_paper_open():
+    """Manual staging test of validated paper entry; NEVER sends broker orders."""
+    from auto_paper_journal import paper_open
+    if os.environ.get("AUTO_PAPER_WRITE_ENABLED") != "1":
+        return jsonify({"success": False, "error": "paper writes disabled"}), 503
+    payload = request.get_json(silent=True) or {}
+    if not isinstance(payload, dict):
+        return jsonify({"success": False, "error": "object required"}), 400
+    try:
+        return jsonify({"success": True, **paper_open(payload.get("candidate"), payload.get("bar"))})
+    except (RuntimeError, OSError) as exc:
+        return jsonify({"success": False, "error": str(exc)}), 503
+
+
+@app.route("/api/auto-paper/status")
+def auto_paper_status():
+    """Expose real readiness, not a misleading AUTO label."""
+    return jsonify({"success": True, "paper_only": True,
+                    "candidate_validation": True, "auto_scan": False,
+                    "auto_entry": False, "auto_exit": False,
+                    "persistent_journal": False, "scheduler": False,
+                    "reason": "Persistent storage and scheduled worker not configured"})
 
 
 if __name__ == "__main__":

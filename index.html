@@ -1291,6 +1291,7 @@ berapa persen mesin yang sudah aktif.
       <button class="refresh" onclick="refreshAutoPaperServerStatus()" style="margin-top:10px">🔄 Cek Mesin Sekarang</button>
       <div class="small" style="margin-top:8px">Ini status server, terpisah dari posisi simulasi yang tersimpan di HP. Tidak ada order uang asli.</div>
     </div>
+    <div class="card" style="margin:12px 0;background:#0c2031;border:1px solid #31516b"><h3 style="margin:0 0 8px">📊 Pantauan Scan Server</h3><div id="serverScanCandidates" class="small" style="white-space:pre-line">Menunggu scan server...</div><div class="small" style="margin-top:8px">Hasil candle harian yang sudah selesai; bukan sinyal beli dan tidak otomatis membuka posisi.</div></div>
     <div class="note">
       Simulasi tanpa uang asli. Harga dipantau dari Yahoo Finance untuk menguji konsistensi StockRadar.
     </div>
@@ -10266,6 +10267,23 @@ async function refreshAutoPaperServerStatus(){
     const state=await response.json();
     if(state.success!==true||state.paper_only!==true)throw new Error('Respons tidak valid');
     const stamp=state.checked_at ? new Date(state.checked_at).toLocaleString('id-ID',{timeZone:'Asia/Jakarta'})+' WIB' : '–';
+    const watchTarget=document.getElementById('serverScanCandidates');
+    if(watchTarget){
+      const p=state.scan_preview||{};
+      if(!p.enabled){
+        watchTarget.textContent='⏳ Scan terjadwal belum diaktifkan di server.';
+      }else if(!p.last_complete_at){
+        watchTarget.textContent='⏳ Jadwal: '+(p.schedule_wib||'10:15 WIB')+'. Belum ada hasil scan.';
+      }else{
+        const rec=Array.isArray(p.candidates)?p.candidates:[];
+        watchTarget.textContent='Jadwal: '+(p.schedule_wib||'10:15 WIB')+'\\n'+
+          'Data maksimal: '+(p.last_session_asof||'--')+'\\n'+
+          'Ticker valid: '+(p.success_count||0)+'/'+(p.scan_count||0)+'\\n'+
+          (rec.length?rec.map((x,i)=>(i+1)+'. '+String(x.ticker||'')+' | Score '+Number(x.score||0).toFixed(1)+' | '+String(x.setup||'')+' | '+String(x.signal_date||'')).join('\\n'):'Belum ada kandidat valid')+
+          (p.last_error?'\\n⚠️ '+String(p.last_error):'')+
+          '\\nCatatan: data harian, bukan sinyal entry.';
+      }
+    }
     target.textContent=
       '✅ Backend terhubung ('+stamp+')\n'+
       (state.scheduler?'✅':'⏳')+' Scan otomatis server: '+(state.scheduler&&state.auto_scan?'aktif':'belum aktif')+'\n'+

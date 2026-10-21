@@ -7,9 +7,11 @@ from auto_paper_rules import evaluate_paper_candidate
 from auto_paper_engine import advance_paper_trade
 
 def _db():
-    path = os.environ.get("AUTO_PAPER_DB_PATH")
-    if not path:
-        raise RuntimeError("AUTO_PAPER_DB_PATH not configured; durable disk required")
+    from paper_storage import storage_health
+    check = storage_health()
+    if not check["ready"]:
+        raise RuntimeError("Durable paper storage unavailable: " + check["reason"])
+    path = os.environ["AUTO_PAPER_DB_PATH"]
     parent = os.path.dirname(os.path.abspath(path))
     if not os.path.isdir(parent):
         raise RuntimeError("database directory unavailable")

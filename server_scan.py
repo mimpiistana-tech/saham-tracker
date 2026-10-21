@@ -120,7 +120,8 @@ def _loop(scan_one):
 def start(scan_one):
     """Run once per Gunicorn worker. Render currently uses one worker."""
     global _worker
-    if os.environ.get("AUTO_SCAN_ENABLED") != "1":
+    if os.environ.get("AUTO_SCAN_ENABLED", "").strip() != "1":
+        print("[StockRadar Watch] disabled: AUTO_SCAN_ENABLED not set to 1", flush=True)
         return False
     with _lock:
         if _worker and _worker.is_alive():
@@ -129,14 +130,19 @@ def start(scan_one):
         _worker = threading.Thread(target=_loop, args=(scan_one,),
                                    name="stockradar-watch-scan", daemon=True)
         _worker.start()
+        print("[StockRadar Watch] worker_started=" + str(_worker.is_alive()), flush=True)
         return True
 
 def status():
     with _lock:
-        enabled = os.environ.get("AUTO_SCAN_ENABLED") == "1"
-        running = bool(enabled and _worker and _worker.is_alive())
+        enabled = os.environ.get("AUTO_SCAN_ENABLED", "").strip() == "1"
+        alive = bool(_worker and _worker.is_alive())
+        running = bool(enabled and alive)
         return {
             "enabled": running,
+            "configured": enabled,
+            "worker_created": _worker is not None,
+            "worker_alive": alive,
             "schedule_wib": "Senin-Jumat 10:15-11:15 WIB, sekali per hari",
             "universe_size": len(WATCH),
             "watch_only": True,

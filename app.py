@@ -4324,12 +4324,23 @@ def auto_paper_trades():
         return jsonify({"success": False, "error": str(exc)}), 503
 
 
+def _auto_paper_write_authorized():
+    """Fail closed unless a server secret is configured and matches."""
+    import hmac
+    expected = os.environ.get("AUTO_PAPER_WRITE_TOKEN", "")
+    supplied = request.headers.get("X-Auto-Paper-Token", "")
+    return (len(expected) >= 32 and bool(supplied)
+            and hmac.compare_digest(expected, supplied))
+
+
 @app.route("/api/auto-paper/advance", methods=["POST"])
 def auto_paper_advance():
     """Manual staging test of a completed candle; NOT a background scheduler."""
     from auto_paper_journal import paper_advance
     if os.environ.get("AUTO_PAPER_WRITE_ENABLED") != "1":
         return jsonify({"success": False, "error": "paper writes disabled"}), 503
+    if not _auto_paper_write_authorized():
+        return jsonify({"success": False, "error": "unauthorized paper write"}), 403
     payload = request.get_json(silent=True) or {}
     if not isinstance(payload, dict) or not isinstance(payload.get("candle"), dict):
         return jsonify({"success": False, "error": "candle required"}), 400
@@ -4345,6 +4356,8 @@ def auto_paper_open():
     from auto_paper_journal import paper_open
     if os.environ.get("AUTO_PAPER_WRITE_ENABLED") != "1":
         return jsonify({"success": False, "error": "paper writes disabled"}), 503
+    if not _auto_paper_write_authorized():
+        return jsonify({"success": False, "error": "unauthorized paper write"}), 403
     payload = request.get_json(silent=True) or {}
     if not isinstance(payload, dict):
         return jsonify({"success": False, "error": "object required"}), 400

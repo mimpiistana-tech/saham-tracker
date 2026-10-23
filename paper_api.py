@@ -1,7 +1,7 @@
-"""Read-only PAPER simulation readiness API; no orders or trading scheduler.
+"""Read-only PAPER simulation readiness API; no broker orders are possible.
 
-Report what is actually enabled instead of claiming automatic trades from a live
-web server. Never expose per-user paper positions through a public endpoint.
+Daily completed bars create risk plans; fresh completed 5m bars can confirm
+paper entry. Exits use subsequent completed daily bars. Never expose positions.
 """
 import os
 from datetime import datetime, timezone
@@ -40,5 +40,5 @@ def status():
         database_probe_status=probe["reason"],
         persistent_journal=storage["ready"] and probe["write_verified"],
         broker_order_enabled=False,
-        note="Preview dari candle harian terakhir yang telah selesai; bukan sinyal entry. Entry/exit hanya simulasi berbasis candle harian selesai, tidak ada order uang asli."
+        note="Rencana risiko dari candle harian selesai; entry paper perlu konfirmasi candle 5-menit selesai dan segar; exit disimulasikan dari candle harian berikutnya. Tidak ada order uang asli."
     )

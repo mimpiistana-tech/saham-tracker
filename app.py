@@ -3883,7 +3883,7 @@ def radar_test():
 
 # The Flask module may be imported before Gunicorn forks its HTTP workers.
 # Start the watch thread inside the request-serving process, never in the master.
-# This does not create broker orders or simulated positions.
+# The worker only creates PAPER positions after explicit signal and entry checks.
 from server_scan import start as start_watch_scan
 
 
@@ -3900,9 +3900,21 @@ def _run_paper_from_watch(items, cutoff):
     run_cycle(items, cutoff, _daily_paper_bars, watch=WATCH)
 
 
+def _run_intraday_paper_entries():
+    from daily_paper_runner import waiting_entries, open_intraday_entry
+    from intraday_paper import fetch_entry_signal
+    for order in waiting_entries():
+        signal = fetch_entry_signal(order.get("ticker"), order.get("entry"))
+        if signal.get("qualified") is True:
+            result = open_intraday_entry(order.get("ticker"), signal)
+            print("[StockRadar Auto Paper] intraday result=" +
+                  str(result.get("event") or result.get("reason")), flush=True)
+
+
 @app.before_request
 def bootstrap_watch_scan_in_http_worker():
-    start_watch_scan(scan_one_ticker, _run_paper_from_watch)
+    start_watch_scan(scan_one_ticker, _run_paper_from_watch,
+                     _run_intraday_paper_entries)
 
 
 if __name__ == "__main__":

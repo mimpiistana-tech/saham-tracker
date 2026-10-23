@@ -180,8 +180,17 @@ def open_intraday_entry(ticker, signal, *, now=None):
     ticker = str(ticker or "").upper()
     if not isinstance(signal, dict) or signal.get("qualified") is not True:
         return {"opened": False, "reason": "entry_not_confirmed"}
-    if signal.get("paper_only") is not True or signal.get("source") != "YAHOO_5M_INDICATIVE":
+    if (signal.get("paper_only") is not True or
+            signal.get("source") != "YAHOO_5M_INDICATIVE" or
+            str(signal.get("ticker", "")).upper() != ticker):
         return {"opened": False, "reason": "untrusted_entry_source"}
+    checks = signal.get("checks")
+    required_checks = ("green", "break_previous_high", "higher_low",
+                       "volume_1_3x", "entry_touched", "close_at_or_above_entry")
+    if (not isinstance(checks, dict) or
+            any(checks.get(name) is not True for name in required_checks) or
+            float(signal.get("volume_ratio") or 0) < 1.3):
+        return {"opened": False, "reason": "entry_checks_not_confirmed"}
     bar = signal.get("bar")
     if not good_bar(bar):
         return {"opened": False, "reason": "invalid_entry_bar"}
@@ -193,7 +202,8 @@ def open_intraday_entry(ticker, signal, *, now=None):
         age = (now.astimezone(timezone.utc) - end.astimezone(timezone.utc)).total_seconds()
         session = date.fromisoformat(str(signal.get("session_date", "")))
         bar_day = date.fromisoformat(str(bar.get("date", "")))
-        if age < 0 or age > 15 * 60 or session != bar_day:
+        if (age < 0 or age > 15 * 60 or session != bar_day or
+                end.astimezone(WIB).date() != session):
             return {"opened": False, "reason": "stale_or_mismatched_entry"}
     except (ValueError, TypeError, AttributeError):
         return {"opened": False, "reason": "invalid_entry_timestamp"}

@@ -1,0 +1,22 @@
+name: StockRadar V2 paper safety
+on:
+  push:
+    branches:
+      - stockradar-v2-fast-scan-20261012
+permissions:
+  contents: read
+jobs:
+  paper-safety:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out staging branch
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Check Python syntax
+        run: python -m py_compile app.py auto_paper_rules.py
+      - name: Run paper safety tests
+        run: python -m unittest -v test_auto_paper_rules

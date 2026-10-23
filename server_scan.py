@@ -17,13 +17,18 @@ WIB = ZoneInfo("Asia/Jakarta")
 RUN_AFTER = time(10, 15)
 RUN_BEFORE = time(11, 15)
 RETRY_SECONDS = 600
-WATCH = ("BBCA", "BBRI", "BMRI", "BBNI", "TLKM", "ASII",
-         "UNTR", "ADRO", "PTBA", "ANTM", "INCO", "BRIS")
+ENTRY_POLL_SECONDS = 300
+ENTRY_POLL_START = time(9, 0)
+ENTRY_POLL_END = time(15, 50)
+WATCH = ("BBCA", "BBRI", "BMRI", "TLKM", "ASII", "UNTR", "ANTM",
+         "PTBA", "ADRO", "BRMS", "ERAA", "PANI", "PWON", "GOTO",
+         "NAYZ", "PIPA", "RANS", "MEJA", "ARCI", "ADMR")
 _lock = threading.RLock()
 _worker = None
 _stop = threading.Event()
 _last_date = None
 _last_attempt_at = None
+_last_entry_poll_at = None
 _state = {
     "last_attempt_at": None,
     "last_complete_at": None,
@@ -112,17 +117,38 @@ def _run_once(scan_one, now, on_scan=None):
             _last_date = today
     return True
 
-def _loop(scan_one, on_scan=None):
-    # Run immediately (helpful if new deployment starts inside the scan window).
+def entry_poll_due(now, last_poll_at):
+    """Poll only during IDX weekdays and market hours; throttle to five minutes."""
+    local = now.astimezone(WIB)
+    clock = local.time().replace(tzinfo=None)
+    if local.weekday() >= 5 or not ENTRY_POLL_START <= clock <= ENTRY_POLL_END:
+        return False
+    return (last_poll_at is None or
+            (now - last_poll_at).total_seconds() >= ENTRY_POLL_SECONDS)
+
+def _loop(scan_one, on_scan=None, on_entry_poll=None):
+    # Start daily watch scan and paper-entry polling in the same existing worker.
+    global _last_entry_poll_at
     while not _stop.is_set():
+        now = datetime.now(timezone.utc)
         try:
-            _run_once(scan_one, datetime.now(timezone.utc), on_scan)
+            _run_once(scan_one, now, on_scan)
         except Exception as exc:
             with _lock:
                 _state["last_error"] = "Scan preview gagal: " + type(exc).__name__
+        if on_entry_poll is not None:
+            with _lock:
+                should_poll = entry_poll_due(now, _last_entry_poll_at)
+                if should_poll:
+                    _last_entry_poll_at = now
+            if should_poll:
+                try:
+                    on_entry_poll()
+                except Exception as exc:
+                    print("[StockRadar Auto Paper] intraday poll error: "+type(exc).__name__, flush=True)
         _stop.wait(30)
 
-def start(scan_one, on_scan=None):
+def start(scan_one, on_scan=None, on_entry_poll=None):
     """Run once per Gunicorn worker. Render currently uses one worker."""
     global _worker
     if os.environ.get("AUTO_SCAN_ENABLED", "").strip() != "1":
@@ -132,7 +158,7 @@ def start(scan_one, on_scan=None):
         if _worker and _worker.is_alive():
             return True
         _stop.clear()
-        _worker = threading.Thread(target=_loop, args=(scan_one,on_scan),
+        _worker = threading.Thread(target=_loop, args=(scan_one,on_scan,on_entry_poll),
                                    name="stockradar-watch-scan", daemon=True)
         _worker.start()
         print("[StockRadar Watch] worker_started=" + str(_worker.is_alive()), flush=True)
@@ -151,6 +177,8 @@ def status():
             "schedule_wib": "Senin-Jumat 10:15-11:15 WIB, sekali per hari",
             "universe_size": len(WATCH),
             "watch_only": True,
+            "intraday_entry_poll_seconds": ENTRY_POLL_SECONDS,
+            "intraday_entry_poll_window_wib": "Senin-Jumat 09:00-15:50 WIB",
             "durable": False,
             "next_check_is_not_guaranteed": True,
             **dict(_state),

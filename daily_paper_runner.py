@@ -187,9 +187,13 @@ def open_intraday_entry(ticker, signal, *, now=None):
     checks = signal.get("checks")
     required_checks = ("green", "break_previous_high", "higher_low",
                        "volume_1_3x", "entry_touched", "close_at_or_above_entry")
+    try:
+        volume_ratio = float(signal.get("volume_ratio"))
+    except (TypeError, ValueError, OverflowError):
+        volume_ratio = 0.0
     if (not isinstance(checks, dict) or
             any(checks.get(name) is not True for name in required_checks) or
-            float(signal.get("volume_ratio") or 0) < 1.3):
+            volume_ratio < 1.3 or volume_ratio != volume_ratio or volume_ratio == float("inf")):
         return {"opened": False, "reason": "entry_checks_not_confirmed"}
     bar = signal.get("bar")
     if not good_bar(bar):

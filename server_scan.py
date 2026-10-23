@@ -20,9 +20,10 @@ RETRY_SECONDS = 600
 ENTRY_POLL_SECONDS = 300
 ENTRY_POLL_START = time(9, 0)
 ENTRY_POLL_END = time(15, 50)
-WATCH = ("BBCA", "BBRI", "BMRI", "TLKM", "ASII", "UNTR", "ANTM",
-         "PTBA", "ADRO", "BRMS", "ERAA", "PANI", "PWON", "GOTO",
-         "NAYZ", "PIPA", "RANS", "MEJA", "ARCI", "ADMR")
+# Union of the existing V3 watchlist and V2 Quick Scan (unique tickers).
+WATCH = ("BBCA", "BBRI", "BMRI", "BBNI", "BRIS", "TLKM", "ASII", "UNTR",
+         "ANTM", "PTBA", "ADRO", "INCO", "BRMS", "ERAA", "PANI", "PWON",
+         "GOTO", "NAYZ", "PIPA", "RANS", "MEJA", "ARCI", "ADMR")
 _lock = threading.RLock()
 _worker = None
 _stop = threading.Event()

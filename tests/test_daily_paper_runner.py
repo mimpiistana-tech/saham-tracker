@@ -35,6 +35,35 @@ class DailyRunnerTests(unittest.TestCase):
         self.assertEqual(second["reason"],"already_processed")
         summary=runner.summary()
         self.assertEqual(summary["counts"]["WAIT_ENTRY"],1)
+    def test_v2_confirmed_intraday_entry_opens_persistent_v3_plan(self):
+        daily=dict(date=self.cutoff,open=102,high=105,low=101,close=103,volume=3000000)
+        result=runner.run_cycle([self.candidate],self.cutoff,lambda t,c:[daily],watch=("BBRI",))
+        self.assertEqual(result["created"],1)
+        self.assertEqual(len(runner.waiting_entries()),1)
+        now=datetime.now(ZoneInfo("Asia/Jakarta"))
+        signal={
+            "qualified":True,"paper_only":True,"source":"YAHOO_5M_INDICATIVE",
+            "session_date":now.date().isoformat(),
+            "bar_end_iso":(now-timedelta(minutes=5)).isoformat(),
+            "volume_ratio":1.5,
+            "bar":{"date":now.date().isoformat(),"open":100.1,"high":101,
+                   "low":99.5,"close":100.8,"volume":150},
+        }
+        opened=runner.open_intraday_entry("BBRI",signal,now=now)
+        self.assertTrue(opened["opened"])
+        self.assertEqual(opened["trade"]["status"],"OPEN")
+        self.assertEqual(opened["trade"]["entry_source"],"V2_5M_BOUNCE")
+        self.assertEqual(runner.summary()["counts"]["OPEN"],1)
+        self.assertEqual(runner.waiting_entries(),[])
+
+    def test_intraday_entry_rejects_unconfirmed_signal(self):
+        daily=dict(date=self.cutoff,open=102,high=105,low=101,close=103,volume=3000000)
+        runner.run_cycle([self.candidate],self.cutoff,lambda t,c:[daily],watch=("BBRI",))
+        result=runner.open_intraday_entry("BBRI",{"qualified":False},now=datetime.now(ZoneInfo("Asia/Jakarta")))
+        self.assertFalse(result["opened"])
+        self.assertEqual(result["reason"],"entry_not_confirmed")
+        self.assertEqual(runner.summary()["counts"]["WAIT_ENTRY"],1)
+
     def test_no_fake_fill_on_invalid_bars(self):
         b=dict(date=self.cutoff,open=105,high=90,low=99,close=100,volume=1)
         result=runner.run_cycle([self.candidate],self.cutoff,lambda t,c:[b],watch=("BBRI",))

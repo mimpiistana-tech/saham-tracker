@@ -16,7 +16,7 @@ jobs:
         with:
           python-version: "3.11"
       - run: pip install -r requirements.txt
-      - run: python -m py_compile paper_api.py auto_paper_rules.py auto_paper_engine.py auto_paper_journal.py intraday_paper.py
+      - run: python -m py_compile app.py server_scan.py daily_paper_runner.py intraday_paper.py paper_api.py auto_paper_rules.py auto_paper_engine.py auto_paper_journal.py
       - run: python -m unittest discover -s tests -p 'test_paper_server.py' -v
       - run: python -m unittest discover -s tests -p 'test_paper_storage.py' -v
       - run: python -m unittest discover -s tests -p 'test_paper_disk_probe.py' -v

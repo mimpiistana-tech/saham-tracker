@@ -158,6 +158,94 @@ def run_cycle(items, cutoff, load_bars, *, watch):
         print("[StockRadar Auto Paper] cycle failed: "+type(e).__name__,flush=True)
         return {"ran":False,"reason":"storage_or_validation_failure"}
 
+
+def waiting_entries():
+    """Return bounded active WAIT_ENTRY plans from the persistent paper journal."""
+    if not enabled() or not storage_health()["ready"]:
+        return []
+    try:
+        with closing(_connection()) as conn:
+            rows = conn.execute(
+                "SELECT ticker,payload FROM daily_paper_trades WHERE status='WAIT_ENTRY' ORDER BY rowid LIMIT 3"
+            ).fetchall()
+        return [json.loads(payload) for _, payload in rows]
+    except (sqlite3.Error, OSError, RuntimeError, ValueError):
+        return []
+
+
+def open_intraday_entry(ticker, signal, *, now=None):
+    """Open a stored paper plan only after a fresh V2-style 5m trigger confirms it."""
+    if not enabled() or not storage_health()["ready"]:
+        return {"opened": False, "reason": "paper_disabled_or_storage_unavailable"}
+    ticker = str(ticker or "").upper()
+    if not isinstance(signal, dict) or signal.get("qualified") is not True:
+        return {"opened": False, "reason": "entry_not_confirmed"}
+    if signal.get("paper_only") is not True or signal.get("source") != "YAHOO_5M_INDICATIVE":
+        return {"opened": False, "reason": "untrusted_entry_source"}
+    bar = signal.get("bar")
+    if not good_bar(bar):
+        return {"opened": False, "reason": "invalid_entry_bar"}
+    try:
+        now = now or datetime.now(timezone.utc)
+        end = datetime.fromisoformat(str(signal.get("bar_end_iso", "")).replace("Z", "+00:00"))
+        if now.tzinfo is None or end.tzinfo is None:
+            return {"opened": False, "reason": "timezone_required"}
+        age = (now.astimezone(timezone.utc) - end.astimezone(timezone.utc)).total_seconds()
+        session = date.fromisoformat(str(signal.get("session_date", "")))
+        bar_day = date.fromisoformat(str(bar.get("date", "")))
+        if age < 0 or age > 15 * 60 or session != bar_day:
+            return {"opened": False, "reason": "stale_or_mismatched_entry"}
+    except (ValueError, TypeError, AttributeError):
+        return {"opened": False, "reason": "invalid_entry_timestamp"}
+
+    with closing(_connection()) as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        rows = conn.execute(
+            "SELECT id,payload FROM daily_paper_trades WHERE ticker=? AND status='WAIT_ENTRY'",
+            (ticker,),
+        ).fetchall()
+        for signal_id, payload in rows:
+            order = json.loads(payload)
+            entry = float(order["entry"])
+            stop = float(order["cut_loss"])
+            high, low, close = float(bar["high"]), float(bar["low"]), float(bar["close"])
+            if (bar_day <= date.fromisoformat(order["signal_day"]) or
+                    not low <= entry <= high or close < entry):
+                continue
+            order.update(
+                entry_day=bar_day.isoformat(),
+                last_bar_day=bar_day.isoformat(),
+                entry_source="V2_5M_BOUNCE",
+                entry_bar_end_iso=end.astimezone(timezone.utc).isoformat(),
+                entry_bar_volume_ratio=signal.get("volume_ratio"),
+            )
+            if low <= stop:
+                order.update(
+                    status="CL", exit_day=bar_day.isoformat(), exit_price=stop,
+                    exit_reason="stop_or_ambiguous_entry_bar",
+                    realized_pnl_pct=round((stop/entry-1)*100-0.20, 4),
+                )
+                event = "PAPER_CL_INTRADAY"
+            else:
+                order["status"] = "OPEN"
+                event = "PAPER_OPEN_INTRADAY"
+            conn.execute(
+                "UPDATE daily_paper_trades SET status=?,payload=? WHERE id=? AND status='WAIT_ENTRY'",
+                (order["status"], json.dumps(order), signal_id),
+            )
+            if conn.total_changes == 0:
+                continue
+            conn.execute(
+                "INSERT OR IGNORE INTO daily_paper_events "
+                "(signal_id,session_date,event,payload) VALUES (?,?,?,?)",
+                (signal_id, bar_day.isoformat(), event, json.dumps(order)),
+            )
+            conn.commit()
+            return {"opened": order["status"] == "OPEN", "event": event,
+                    "trade": order, "paper_only": True}
+        conn.rollback()
+    return {"opened": False, "reason": "no_waiting_plan_or_entry_not_touched"}
+
 def summary():
     info = {"configured":enabled(), "last_success":LAST["last_success"],
             "last_error":LAST["last_error"], "mode":"daily_completed_bars_only",

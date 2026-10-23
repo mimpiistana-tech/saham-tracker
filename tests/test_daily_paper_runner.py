@@ -43,9 +43,12 @@ class DailyRunnerTests(unittest.TestCase):
         now=datetime.now(ZoneInfo("Asia/Jakarta"))
         signal={
             "qualified":True,"paper_only":True,"source":"YAHOO_5M_INDICATIVE",
-            "session_date":now.date().isoformat(),
+            "ticker":"BBRI","session_date":now.date().isoformat(),
             "bar_end_iso":(now-timedelta(minutes=5)).isoformat(),
             "volume_ratio":1.5,
+            "checks":{"green":True,"break_previous_high":True,"higher_low":True,
+                      "volume_1_3x":True,"entry_touched":True,
+                      "close_at_or_above_entry":True},
             "bar":{"date":now.date().isoformat(),"open":100.1,"high":101,
                    "low":99.5,"close":100.8,"volume":150},
         }

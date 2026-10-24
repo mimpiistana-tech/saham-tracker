@@ -4299,6 +4299,17 @@ def radar_test():
 
 
 
+
+@app.route("/api/auto-paper/scanner-watch", methods=["POST"])
+def auto_paper_scanner_watch():
+    """Bridge V2 scanner output into paper WATCH candidates; never auto-fill."""
+    from scanner_paper_bridge import bridge_scanner_result
+    payload = request.get_json(silent=True)
+    return jsonify({"success": True, **bridge_scanner_result(payload),
+                    "auto_entry_enabled": False, "journal_persistent": False,
+                    "broker_order_enabled": False})
+
+
 @app.route("/api/auto-paper/evaluate", methods=["POST"])
 def auto_paper_evaluate():
     """PAPER-ONLY validation API; does not open positions or place orders."""

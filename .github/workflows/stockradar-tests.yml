@@ -18,4 +18,4 @@ jobs:
       - name: Test rules and security without broker access
         env:
           AUTO_PAPER_WRITE_ENABLED: '0'
-        run: python -m unittest -v test_auto_paper_rules test_auto_paper_auth test_scanner_paper_bridge
+        run: python -m unittest -v test_auto_paper_rules test_auto_paper_auth test_scanner_paper_bridge test_scanner_watch_api

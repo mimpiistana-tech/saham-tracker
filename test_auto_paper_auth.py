@@ -32,5 +32,31 @@ class PaperWriteAuthTests(unittest.TestCase):
                                         headers={"X-Auto-Paper-Token":"short"})
             self.assertEqual(response.status_code, 403)
 
+
+    def test_journal_read_without_token_denied(self):
+        with patch.dict(os.environ, {"AUTO_PAPER_WRITE_TOKEN": "a"*40}):
+            self.assertEqual(self.client.get("/api/auto-paper/trades").status_code, 403)
+
+    def test_journal_read_wrong_token_denied(self):
+        with patch.dict(os.environ, {"AUTO_PAPER_WRITE_TOKEN": "a"*40}):
+            response = self.client.get("/api/auto-paper/trades",
+                                       headers={"X-Auto-Paper-Token": "wrong"})
+            self.assertEqual(response.status_code, 403)
+
+    def test_journal_read_short_secret_denied(self):
+        with patch.dict(os.environ, {"AUTO_PAPER_WRITE_TOKEN": "short"}):
+            response = self.client.get("/api/auto-paper/trades",
+                                       headers={"X-Auto-Paper-Token": "short"})
+            self.assertEqual(response.status_code, 403)
+
+    def test_journal_read_valid_token_calls_journal(self):
+        with patch.dict(os.environ, {"AUTO_PAPER_WRITE_TOKEN": "a"*40}):
+            with patch("auto_paper_journal.paper_list", return_value={"paper_only": True, "trades": []}) as journal:
+                response = self.client.get("/api/auto-paper/trades",
+                                           headers={"X-Auto-Paper-Token": "a"*40})
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(response.get_json()["trades"], [])
+                journal.assert_called_once_with()
+
 if __name__ == "__main__":
     unittest.main()

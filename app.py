@@ -4318,6 +4318,8 @@ def auto_paper_evaluate():
 def auto_paper_trades():
     """Read persistent paper journal; fail closed when disk not configured."""
     from auto_paper_journal import paper_list
+    if not _auto_paper_write_authorized():
+        return jsonify({"success": False, "error": "unauthorized paper journal read"}), 403
     try:
         return jsonify({"success": True, **paper_list()})
     except (RuntimeError, OSError) as exc:

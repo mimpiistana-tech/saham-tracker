@@ -30,6 +30,15 @@ _stop = threading.Event()
 _last_date = None
 _last_attempt_at = None
 _last_entry_poll_at = None
+_entry_poll_state = {
+    "last_attempt_at": None,
+    "last_complete_at": None,
+    "waiting_plans": 0,
+    "checked_plans": 0,
+    "opened": 0,
+    "reasons": {},
+    "last_error": None,
+}
 _state = {
     "last_attempt_at": None,
     "last_complete_at": None,
@@ -143,9 +152,27 @@ def _loop(scan_one, on_scan=None, on_entry_poll=None):
                 if should_poll:
                     _last_entry_poll_at = now
             if should_poll:
+                poll_started = datetime.now(timezone.utc)
+                with _lock:
+                    _entry_poll_state["last_attempt_at"] = poll_started.isoformat()
+                    _entry_poll_state["last_error"] = None
                 try:
-                    on_entry_poll()
+                    result = on_entry_poll() or {}
+                    with _lock:
+                        _entry_poll_state.update(
+                            last_complete_at=datetime.now(timezone.utc).isoformat(),
+                            waiting_plans=int(result.get("waiting_plans", 0) or 0),
+                            checked_plans=int(result.get("checked_plans", 0) or 0),
+                            opened=int(result.get("opened", 0) or 0),
+                            reasons=dict(result.get("reasons") or {}),
+                        )
+                    print("[StockRadar Auto Paper] intraday poll " +
+                          str(_entry_poll_state["checked_plans"]) + " checked, " +
+                          str(_entry_poll_state["opened"]) + " opened", flush=True)
                 except Exception as exc:
+                    with _lock:
+                        _entry_poll_state["last_complete_at"] = datetime.now(timezone.utc).isoformat()
+                        _entry_poll_state["last_error"] = type(exc).__name__
                     print("[StockRadar Auto Paper] intraday poll error: "+type(exc).__name__, flush=True)
         _stop.wait(30)
 
@@ -180,6 +207,7 @@ def status():
             "watch_only": True,
             "intraday_entry_poll_seconds": ENTRY_POLL_SECONDS,
             "intraday_entry_poll_window_wib": "Senin-Jumat 09:00-15:50 WIB",
+            "intraday_entry": dict(_entry_poll_state),
             "durable": False,
             "next_check_is_not_guaranteed": True,
             **dict(_state),

@@ -10288,6 +10288,10 @@ async function refreshAutoPaperServerStatus(){
       '✅ Backend terhubung ('+stamp+')\n'+
       (state.auto_scan?'✅':'⏳')+' Scan pantauan harian server: '+(state.auto_scan?'aktif':'belum aktif')+'\n'+
       (state.auto_entry?'✅':'⏳')+' Entry paper otomatis: '+(state.auto_entry?'aktif':'belum aktif')+'\n'+
+      '📋 Rencana menunggu: '+Number((state.paper_engine?.counts||{}).WAIT_ENTRY||0)+' | Posisi terbuka: '+Number((state.paper_engine?.counts||{}).OPEN||0)+'\n'+
+      '🔎 Cek entry 5-menit terakhir: '+(state.scan_preview?.intraday_entry?.last_complete_at?new Date(state.scan_preview.intraday_entry.last_complete_at).toLocaleString('id-ID',{timeZone:'Asia/Jakarta'})+' WIB':'belum tercatat')+'\n'+
+      (state.scan_preview?.intraday_entry?.last_error?'⚠️ Pemeriksa entry: '+String(state.scan_preview.intraday_entry.last_error)+'\n':'')+
+      (Object.keys(state.scan_preview?.intraday_entry?.reasons||{}).length?'Hasil cek: '+Object.entries(state.scan_preview.intraday_entry.reasons).map(([k,v])=>k+' '+v).join(', ')+'\n':'')+
       (state.auto_exit?'✅':'⏳')+' TP/SL paper otomatis: '+(state.auto_exit?'aktif':'belum aktif')+'\n'+
       (state.persistent_journal?'✅':'⏳')+' Penyimpanan permanen: '+(state.persistent_journal?'aktif':'belum aktif')+'\n'+
       '🔒 Order broker uang asli: '+(state.broker_order_enabled?'PERLU DITINJAU':'nonaktif');

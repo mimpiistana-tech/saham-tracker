@@ -20,6 +20,12 @@ def status():
     probe = probe_database()
     from daily_paper_runner import summary as paper_summary
     paper = paper_summary()
+    from daily_paper_runner import waiting_entries
+    pending_entries = [
+        {"ticker": str(order.get("ticker") or "").upper(),
+         "signal_day": str(order.get("signal_day") or "")}
+        for order in waiting_entries()
+    ]
     return jsonify(
         success=True,
         paper_only=True,
@@ -32,6 +38,7 @@ def status():
         auto_exit=paper["configured"] and paper["positions_on_server"] and scan["enabled"],
         scheduler=paper["configured"] and scan["enabled"],
         paper_engine=paper,
+        pending_entries=pending_entries,
         journal_path_configured=bool(os.environ.get("AUTO_PAPER_DB_PATH")),
         storage_check=storage["reason"],
         database_write_verified=probe["write_verified"],

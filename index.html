@@ -10284,11 +10284,16 @@ async function refreshAutoPaperServerStatus(){
           '\\nCatatan: data harian, bukan sinyal entry.';
       }
     }
+    const pendingEntries=Array.isArray(state.pending_entries)?state.pending_entries:[];
+    const pendingTickerText=pendingEntries.length
+      ? pendingEntries.map(x=>String(x.ticker||'--')+(x.signal_day?' (sinyal '+String(x.signal_day)+')':'')).join(', ')
+      : 'belum ada';
     target.textContent=
       '✅ Backend terhubung ('+stamp+')\n'+
       (state.auto_scan?'✅':'⏳')+' Scan pantauan harian server: '+(state.auto_scan?'aktif':'belum aktif')+'\n'+
       (state.auto_entry?'✅':'⏳')+' Entry paper otomatis: '+(state.auto_entry?'aktif':'belum aktif')+'\n'+
       '📋 Rencana menunggu: '+Number((state.paper_engine?.counts||{}).WAIT_ENTRY||0)+' | Posisi terbuka: '+Number((state.paper_engine?.counts||{}).OPEN||0)+'\n'+
+      '📌 Saham WAIT ENTRY: '+pendingTickerText+'\n'+
       '🔎 Cek entry 5-menit terakhir: '+(state.scan_preview?.intraday_entry?.last_complete_at?new Date(state.scan_preview.intraday_entry.last_complete_at).toLocaleString('id-ID',{timeZone:'Asia/Jakarta'})+' WIB':'belum tercatat')+'\n'+
       (state.scan_preview?.intraday_entry?.last_error?'⚠️ Pemeriksa entry: '+String(state.scan_preview.intraday_entry.last_error)+'\n':'')+
       (Object.keys(state.scan_preview?.intraday_entry?.reasons||{}).length?'Hasil cek: '+Object.entries(state.scan_preview.intraday_entry.reasons).map(([k,v])=>k+' '+v).join(', ')+'\n':'')+

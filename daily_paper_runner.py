@@ -263,6 +263,7 @@ def open_intraday_entry(ticker, signal, *, now=None):
 def summary():
     info = {"configured":enabled(), "last_success":LAST["last_success"],
             "last_error":LAST["last_error"], "mode":"daily_completed_bars_only",
+            "entry_mode":"completed_daily_bar_touch",
             "no_live_orders":True,"positions_on_server":False,
             "counts":{key:0 for key in ("WAIT_ENTRY","OPEN","TP1_HIT","CL","TP2","TIME","EXPIRED")}}
     if not storage_health()["ready"]:

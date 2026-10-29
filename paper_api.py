@@ -1,7 +1,7 @@
 """Read-only PAPER simulation readiness API; no broker orders are possible.
 
-Daily completed bars create risk plans; fresh completed 5m bars can confirm
-paper entry. Exits use subsequent completed daily bars. Never expose positions.
+Completed daily bars create plans, confirm paper entries, and manage exits.
+Never expose positions.
 """
 import os
 from datetime import datetime, timezone
@@ -47,5 +47,5 @@ def status():
         database_probe_status=probe["reason"],
         persistent_journal=storage["ready"] and probe["write_verified"],
         broker_order_enabled=False,
-        note="Rencana risiko dari candle harian selesai; entry paper perlu konfirmasi candle 5-menit selesai dan segar; exit disimulasikan dari candle harian berikutnya. Tidak ada order uang asli."
+        note="Rencana, entry, dan exit paper hanya diproses dari candle harian IDX yang sudah selesai dan tervalidasi. Tidak ada order uang asli."
     )

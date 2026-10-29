@@ -1,7 +1,8 @@
 import unittest
-from datetime import datetime, timedelta, timezone
+from datetime import datetime
+from unittest.mock import patch
 from zoneinfo import ZoneInfo
-from server_scan import due, entry_poll_due
+from server_scan import due, status
 
 
 class ScheduleTests(unittest.TestCase):
@@ -9,14 +10,12 @@ class ScheduleTests(unittest.TestCase):
         now=datetime(2026,10,21,10,16,tzinfo=ZoneInfo("Asia/Jakarta"))
         self.assertTrue(due(now,None))
         self.assertFalse(due(now,"2026-10-21"))
-    def test_intraday_entry_poll_is_throttled_to_market_hours(self):
-        tz=ZoneInfo("Asia/Jakarta")
-        now=datetime(2026,10,21,10,16,tzinfo=tz)
-        self.assertTrue(entry_poll_due(now,None))
-        self.assertFalse(entry_poll_due(now,now))
-        self.assertTrue(entry_poll_due(now+timedelta(minutes=5),now))
-        self.assertFalse(entry_poll_due(datetime(2026,10,24,10,16,tzinfo=tz),None))
-        self.assertFalse(entry_poll_due(datetime(2026,10,21,16,0,tzinfo=tz),None))
+    def test_status_declares_daily_bar_entry_mode(self):
+        with patch.dict("os.environ", {"AUTO_SCAN_ENABLED":"1"}):
+            state=status()
+        self.assertEqual(state["paper_entry_mode"],"completed_daily_bar_touch")
+        self.assertNotIn("intraday_entry",state)
+        self.assertNotIn("intraday_entry_poll_seconds",state)
 
     def test_no_weekends_or_old_hours(self):
         tz=ZoneInfo("Asia/Jakarta")

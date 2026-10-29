@@ -1,11 +1,11 @@
-"""StockRadar's read-only daily watchlist preview.
+"""StockRadar's daily watchlist and daily-bar paper runner.
 
 One background daemon thread on our existing paid web instance checks a bounded
 set of Indonesian stocks from the LAST COMPLETED daily session, after 10:15 WIB
-on weekdays. This is neither intraday data nor an automatic trading signal.
+on weekdays. Paper entries and exits are evaluated from completed daily bars.
 
-State is in-memory and lost on service restart. No paper/live order, no
-database mutation, no use of limited IndexAlpha broker quota.
+Scanner state is in-memory and lost on service restart. The paper runner
+persists daily-bar simulations separately. No live order or IndexAlpha quota.
 """
 import math
 import os
@@ -17,9 +17,6 @@ WIB = ZoneInfo("Asia/Jakarta")
 RUN_AFTER = time(10, 15)
 RUN_BEFORE = time(11, 15)
 RETRY_SECONDS = 600
-ENTRY_POLL_SECONDS = 300
-ENTRY_POLL_START = time(9, 0)
-ENTRY_POLL_END = time(15, 50)
 # Union of the existing V3 watchlist and V2 Quick Scan (unique tickers).
 WATCH = ("BBCA", "BBRI", "BMRI", "BBNI", "BRIS", "TLKM", "ASII", "UNTR",
          "ANTM", "PTBA", "ADRO", "INCO", "BRMS", "ERAA", "PANI", "PWON",
@@ -29,16 +26,6 @@ _worker = None
 _stop = threading.Event()
 _last_date = None
 _last_attempt_at = None
-_last_entry_poll_at = None
-_entry_poll_state = {
-    "last_attempt_at": None,
-    "last_complete_at": None,
-    "waiting_plans": 0,
-    "checked_plans": 0,
-    "opened": 0,
-    "reasons": {},
-    "last_error": None,
-}
 _state = {
     "last_attempt_at": None,
     "last_complete_at": None,
@@ -127,18 +114,8 @@ def _run_once(scan_one, now, on_scan=None):
             _last_date = today
     return True
 
-def entry_poll_due(now, last_poll_at):
-    """Poll only during IDX weekdays and market hours; throttle to five minutes."""
-    local = now.astimezone(WIB)
-    clock = local.time().replace(tzinfo=None)
-    if local.weekday() >= 5 or not ENTRY_POLL_START <= clock <= ENTRY_POLL_END:
-        return False
-    return (last_poll_at is None or
-            (now - last_poll_at).total_seconds() >= ENTRY_POLL_SECONDS)
-
-def _loop(scan_one, on_scan=None, on_entry_poll=None):
-    # Start daily watch scan and paper-entry polling in the same existing worker.
-    global _last_entry_poll_at
+def _loop(scan_one, on_scan=None):
+    # Daily scan and completed-daily-bar paper processing share one worker.
     while not _stop.is_set():
         now = datetime.now(timezone.utc)
         try:
@@ -146,37 +123,9 @@ def _loop(scan_one, on_scan=None, on_entry_poll=None):
         except Exception as exc:
             with _lock:
                 _state["last_error"] = "Scan preview gagal: " + type(exc).__name__
-        if on_entry_poll is not None:
-            with _lock:
-                should_poll = entry_poll_due(now, _last_entry_poll_at)
-                if should_poll:
-                    _last_entry_poll_at = now
-            if should_poll:
-                poll_started = datetime.now(timezone.utc)
-                with _lock:
-                    _entry_poll_state["last_attempt_at"] = poll_started.isoformat()
-                    _entry_poll_state["last_error"] = None
-                try:
-                    result = on_entry_poll() or {}
-                    with _lock:
-                        _entry_poll_state.update(
-                            last_complete_at=datetime.now(timezone.utc).isoformat(),
-                            waiting_plans=int(result.get("waiting_plans", 0) or 0),
-                            checked_plans=int(result.get("checked_plans", 0) or 0),
-                            opened=int(result.get("opened", 0) or 0),
-                            reasons=dict(result.get("reasons") or {}),
-                        )
-                    print("[StockRadar Auto Paper] intraday poll " +
-                          str(_entry_poll_state["checked_plans"]) + " checked, " +
-                          str(_entry_poll_state["opened"]) + " opened", flush=True)
-                except Exception as exc:
-                    with _lock:
-                        _entry_poll_state["last_complete_at"] = datetime.now(timezone.utc).isoformat()
-                        _entry_poll_state["last_error"] = type(exc).__name__
-                    print("[StockRadar Auto Paper] intraday poll error: "+type(exc).__name__, flush=True)
         _stop.wait(30)
 
-def start(scan_one, on_scan=None, on_entry_poll=None):
+def start(scan_one, on_scan=None):
     """Run once per Gunicorn worker. Render currently uses one worker."""
     global _worker
     if os.environ.get("AUTO_SCAN_ENABLED", "").strip() != "1":
@@ -186,7 +135,7 @@ def start(scan_one, on_scan=None, on_entry_poll=None):
         if _worker and _worker.is_alive():
             return True
         _stop.clear()
-        _worker = threading.Thread(target=_loop, args=(scan_one,on_scan,on_entry_poll),
+        _worker = threading.Thread(target=_loop, args=(scan_one,on_scan),
                                    name="stockradar-watch-scan", daemon=True)
         _worker.start()
         print("[StockRadar Watch] worker_started=" + str(_worker.is_alive()), flush=True)
@@ -205,9 +154,7 @@ def status():
             "schedule_wib": "Senin-Jumat 10:15-11:15 WIB, sekali per hari",
             "universe_size": len(WATCH),
             "watch_only": True,
-            "intraday_entry_poll_seconds": ENTRY_POLL_SECONDS,
-            "intraday_entry_poll_window_wib": "Senin-Jumat 09:00-15:50 WIB",
-            "intraday_entry": dict(_entry_poll_state),
+            "paper_entry_mode": "completed_daily_bar_touch",
             "durable": False,
             "next_check_is_not_guaranteed": True,
             **dict(_state),

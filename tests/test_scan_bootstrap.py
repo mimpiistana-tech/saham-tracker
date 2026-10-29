@@ -14,6 +14,10 @@ class ScannerStartupTests(unittest.TestCase):
         self.assertTrue(any(isinstance(n,ast.Expr) and isinstance(n.value,ast.Call)
             and isinstance(n.value.func,ast.Name) and n.value.func.id=="start_watch_scan"
             for n in funcs[0].body))
+        start_call=next(n.value for n in funcs[0].body
+            if isinstance(n,ast.Expr) and isinstance(n.value,ast.Call)
+            and isinstance(n.value.func,ast.Name) and n.value.func.id=="start_watch_scan")
+        self.assertEqual(len(start_call.args),2)
         self.assertTrue(any(isinstance(d,ast.Attribute) and d.attr=="before_request" for d in funcs[0].decorator_list))
     def test_source_does_not_hide_import_in_comment(self):
         source=Path("app.py").read_text(encoding="utf-8")

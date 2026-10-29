@@ -3883,7 +3883,7 @@ def radar_test():
 
 # The Flask module may be imported before Gunicorn forks its HTTP workers.
 # Start the watch thread inside the request-serving process, never in the master.
-# The worker only creates PAPER positions after explicit signal and entry checks.
+# The worker only creates PAPER positions from validated completed daily bars.
 from server_scan import start as start_watch_scan
 
 
@@ -3900,36 +3900,9 @@ def _run_paper_from_watch(items, cutoff):
     run_cycle(items, cutoff, _daily_paper_bars, watch=WATCH)
 
 
-def _run_intraday_paper_entries():
-    from daily_paper_runner import waiting_entries, open_intraday_entry
-    from intraday_paper import fetch_entry_signal
-    orders = waiting_entries()
-    reasons = {}
-    opened = 0
-    checked = 0
-    for order in orders:
-        signal = fetch_entry_signal(order.get("ticker"), order.get("entry"))
-        checked += 1
-        if signal.get("qualified") is True:
-            result = open_intraday_entry(order.get("ticker"), signal)
-            if result.get("opened") is True:
-                opened += 1
-            reason = result.get("event") or result.get("reason") or "unknown"
-        else:
-            reason = signal.get("reason") or "signal_not_qualified"
-            if reason == "entry_checks_failed" and isinstance(signal.get("checks"), dict):
-                failed = [key for key, passed in signal["checks"].items() if passed is not True]
-                if failed:
-                    reason = "failed:" + ",".join(failed)
-        reasons[reason] = reasons.get(reason, 0) + 1
-    return {"waiting_plans": len(orders), "checked_plans": checked,
-            "opened": opened, "reasons": reasons}
-
-
 @app.before_request
 def bootstrap_watch_scan_in_http_worker():
-    start_watch_scan(scan_one_ticker, _run_paper_from_watch,
-                     _run_intraday_paper_entries)
+    start_watch_scan(scan_one_ticker, _run_paper_from_watch)
 
 
 if __name__ == "__main__":

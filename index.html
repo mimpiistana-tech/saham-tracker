@@ -10279,14 +10279,24 @@ async function refreshAutoPaperServerStatus(){
         watchTarget.textContent='Jadwal: '+(p.schedule_wib||'10:15 WIB')+'\\n'+
           'Data maksimal: '+(p.last_session_asof||'--')+'\\n'+
           'Ticker valid: '+(p.success_count||0)+'/'+(p.scan_count||0)+'\\n'+
-          (rec.length?rec.map((x,i)=>(i+1)+'. '+String(x.ticker||'')+' | Score '+Number(x.score||0).toFixed(1)+' | '+String(x.setup||'')+' | '+String(x.signal_date||'')).join('\\n'):'Belum ada kandidat valid')+
+          (rec.length?rec.map((x,i)=>(i+1)+'. '+String(x.ticker||'')+' | Score '+Number(x.score||0).toFixed(1)+' | '+String(x.setup||'')+' | '+String(x.signal_date||'')+' | '+String(x.paper_plan_reason||'Belum ada rincian')).join('\\n'):'Belum ada kandidat valid')+
           (p.last_error?'\\n⚠️ '+String(p.last_error):'')+
           '\\nCatatan: data harian, bukan sinyal entry.';
       }
     }
     const pendingEntries=Array.isArray(state.pending_entries)?state.pending_entries:[];
     const pendingTickerText=pendingEntries.length
-      ? pendingEntries.map(x=>String(x.ticker||'--')+(x.signal_day?' (sinyal '+String(x.signal_day)+')':'')).join(', ')
+      ? pendingEntries.map(x=>String(x.ticker||'--')+' (sinyal '+String(x.signal_day||'--')+')'+
+          ' | Entry Rp'+Number(x.entry||0).toLocaleString('id-ID')+
+          ' | SL Rp'+Number(x.cut_loss||0).toLocaleString('id-ID')+
+          ' | TP1/TP2 Rp'+Number(x.tp1||0).toLocaleString('id-ID')+'/'+Number(x.tp2||0).toLocaleString('id-ID')+
+          '\nMenunggu '+Number(x.waited_sessions||0)+'/'+Number(x.max_wait_sessions||5)+' sesi'+
+          ' | Sisa '+Number(x.remaining_sessions||0)+' sesi | '+String(x.waiting_reason||'Belum ada rincian')+
+          (x.last_bar_low!=null?' | Candle '+String(x.last_bar_day||'')+': '+x.last_bar_low+'–'+x.last_bar_high:'')+
+          (x.rounding_pending?'\nPembulatan mulai candle berikutnya: entry Rp'+Number(x.next_session_levels?.entry||0).toLocaleString('id-ID')+
+            ', SL Rp'+Number(x.next_session_levels?.cut_loss||0).toLocaleString('id-ID')+
+            ', TP1/TP2 Rp'+Number(x.next_session_levels?.tp1||0).toLocaleString('id-ID')+'/'+Number(x.next_session_levels?.tp2||0).toLocaleString('id-ID')+
+            (x.next_session_levels?.status==='EXPIRED'?' | Akan kedaluwarsa: '+String(x.next_session_levels.exit_reason||'harga tidak valid'):''):'')).join('\n')
       : 'belum ada';
     target.textContent=
       '✅ Backend terhubung ('+stamp+')\n'+
@@ -10294,6 +10304,10 @@ async function refreshAutoPaperServerStatus(){
       (state.auto_entry?'✅':'⏳')+' Entry paper otomatis: '+(state.auto_entry?'aktif':'belum aktif')+'\n'+
       '📋 Rencana menunggu: '+Number((state.paper_engine?.counts||{}).WAIT_ENTRY||0)+' | Posisi terbuka: '+Number((state.paper_engine?.counts||{}).OPEN||0)+'\n'+
       '📌 Saham WAIT ENTRY: '+pendingTickerText+'\n'+
+      '📋 Hasil seleksi terakhir: '+((state.paper_engine?.candidate_decisions||[]).length
+        ? (state.paper_engine.candidate_decisions).map(x=>String(x.ticker||'')+': '+String(x.reason||'')).join('\n')
+        : 'Rincian tersedia setelah scan harian berikutnya')+'\n'+
+      ((state.paper_engine?.recent_expired||[]).length?'⌛ Rencana kedaluwarsa: '+state.paper_engine.recent_expired.map(x=>String(x.ticker||'')+' '+String(x.exit_day||'')+' — '+String(x.exit_reason||'')).join('; ')+'\n':'')+
       '📆 Metode entry paper: '+(state.paper_engine?.entry_mode==='completed_daily_bar_touch'?'sentuhan candle harian selesai':'belum diketahui')+'\n'+
       (state.auto_exit?'✅':'⏳')+' TP/SL paper otomatis: '+(state.auto_exit?'aktif':'belum aktif')+'\n'+
       (state.persistent_journal?'✅':'⏳')+' Penyimpanan permanen: '+(state.persistent_journal?'aktif':'belum aktif')+'\n'+

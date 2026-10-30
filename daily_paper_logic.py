@@ -6,6 +6,61 @@ because daily OHLC cannot determine intraday event order.
 """
 import math
 from datetime import date
+from decimal import Decimal, ROUND_CEILING, ROUND_FLOOR
+
+MAX_WAIT_SESSIONS = 5
+
+def round_idx(value, direction):
+    """Regular-market price ladder; never round a breakout trigger down."""
+    value = price(value)
+    if value is None:
+        return None
+    tick = 1 if value < 200 else 2 if value < 500 else 5 if value < 2000 else 10 if value < 5000 else 25
+    rounding = ROUND_CEILING if direction == "up" else ROUND_FLOOR
+    return float((Decimal(str(value)) / tick).to_integral_value(rounding=rounding) * tick)
+
+def rounded_levels(plan, mode):
+    return {key: round_idx(plan.get(key), "up" if key in {"tp1", "tp2"} or
+                         (key == "entry" and mode == "BREAKOUT") else "down")
+            for key in ("entry", "cut_loss", "tp1", "tp2")}
+
+def candidate_decision(item):
+    """Explain the unchanged admission thresholds, without creating an order."""
+    reasons = []
+    if item.get("setup") not in {"Momentum", "Watch Pullback"}:
+        reasons.append("Setup belum Momentum / Watch Pullback")
+    for key, minimum, label in (("score",65,"Skor"),("trend_score",60,"Tren"),
+                                 ("risk_score",55,"Skor risiko"),("volume_ratio",1.3,"Rasio volume")):
+        actual = price(item.get(key)) or 0
+        if actual < minimum:
+            reasons.append(f"{label} {actual:g} < {minimum:g}")
+    plan = planned_order(item)
+    if plan is None and not reasons:
+        reasons.append("Tanggal, harga, risk/reward, mode, atau ukuran lot tidak valid setelah pembulatan")
+    return {"eligible": plan is not None, "reasons": reasons,
+            "reason": "; ".join(reasons) if reasons else "Lolos syarat rencana; menunggu harga entry"}
+
+def normalize_waiting_order(order):
+    """Prospective only: preserve last processed session and never enlarge risk."""
+    row = dict(order)
+    if row.get("status") != "WAIT_ENTRY" or row.get("price_rounding_version") == 1:
+        return row
+    levels = rounded_levels(row, row.get("mode"))
+    entry, stop, tp1, tp2 = (levels[k] for k in ("entry","cut_loss","tp1","tp2"))
+    if (any(price(v) is None for v in levels.values()) or not stop < entry < tp1 < tp2
+            or (entry-stop)/entry > .15 or (tp2-entry)/(entry-stop) < 1.5):
+        row.update(status="EXPIRED", exit_reason="Harga tidak valid setelah pembulatan")
+        return row
+    risk_budget = min(100_000, float(row.get("planned_risk") or 100_000))
+    lots = min(int(row.get("lots") or 0), int(risk_budget // ((entry-stop)*100)),
+               int(float(row.get("paper_value") or 0) // (entry*100)))
+    if lots < 1:
+        row.update(status="EXPIRED", exit_reason="Lot tidak mencukupi setelah pembulatan")
+        return row
+    row["original_levels"] = {key: row.get(key) for key in levels}
+    row.update(levels, lots=lots, shares=lots*100, paper_value=lots*100*entry,
+               planned_risk=lots*100*(entry-stop), price_rounding_version=1)
+    return row
 
 ACTIVE = {"WAIT_ENTRY", "OPEN", "TP1_HIT"}
 CLOSED = {"CL", "TP2", "TIME", "EXPIRED"}
@@ -47,7 +102,11 @@ def planned_order(item, *, capital=10_000_000, risk_pct=1.0, slots=3):
     if not ticker.isascii() or not ticker.isalpha() or not (3 <= len(ticker) <= 5):
         return None
     plan = item.get("paper_plan") or {}
-    entry, stop, tp1, tp2 = (price(plan.get(k)) for k in ("entry", "cut_loss", "tp1", "tp2"))
+    mode = str(plan.get("entry_mode") or item.get("entry_mode") or "").upper()
+    if mode not in {"BREAKOUT","PULLBACK"}:
+        return None
+    levels = rounded_levels(plan, mode)
+    entry, stop, tp1, tp2 = (price(levels[k]) for k in ("entry", "cut_loss", "tp1", "tp2"))
     if any(x is None for x in (entry, stop, tp1, tp2)) or not stop < entry < tp1 < tp2:
         return None
     if (entry - stop)/entry > .15 or (tp2-entry)/(entry-stop) < 1.5:
@@ -58,18 +117,17 @@ def planned_order(item, *, capital=10_000_000, risk_pct=1.0, slots=3):
                int((capital/slots)//(entry*100)))
     if lots < 1:
         return None
-    mode = str(plan.get("entry_mode") or item.get("entry_mode") or "").upper()
-    if mode not in {"BREAKOUT","PULLBACK"}:
-        return None
     return dict(signal_id=ticker+":"+signal_day, ticker=ticker, signal_day=signal_day,
                 status="WAIT_ENTRY", entry=entry, cut_loss=stop, tp1=tp1, tp2=tp2,
                 mode=mode, lots=lots, shares=lots*100, paper_value=round(lots*100*entry,2),
                 planned_risk=round(lots*100*(entry-stop),2), score=float(item["score"]),
                 setup=item["setup"], last_bar_day=signal_day,
                 waited=0, held=0, entry_day=None, tp1_day=None, exit_day=None,
-                exit_price=None, realized_pnl_pct=None, paper_only=True)
+                exit_price=None, realized_pnl_pct=None, paper_only=True,
+                price_rounding_version=1,
+                original_levels={key:plan.get(key) for key in levels})
 
-def apply_bar(order, bar, *, max_wait=5, max_hold=20, fee_bps=20):
+def apply_bar(order, bar, *, max_wait=MAX_WAIT_SESSIONS, max_hold=20, fee_bps=20):
     """One completed subsequent candle. Returns (new_state, event).
     A partial TP1 is a flag only: the entire mock position exits at TP2/CL/TIME.
     """
@@ -85,13 +143,22 @@ def apply_bar(order, bar, *, max_wait=5, max_hold=20, fee_bps=20):
     if row.get("status") not in ACTIVE:
         return row, "NO_CHANGE"
     high, low = float(bar["high"]), float(bar["low"])
+    # Only migrate a legacy plan before an unseen session, never replay old fills.
+    row = normalize_waiting_order(row)
+    if row["status"] == "EXPIRED":
+        row["exit_day"] = day.isoformat()
+        return row, "EXPIRED"
     entry, stop, tp1, tp2 = (float(row[k]) for k in ("entry","cut_loss","tp1","tp2"))
     row["last_bar_day"] = day.isoformat()
+    row.update(last_bar_low=low, last_bar_high=high)
     if row["status"] == "WAIT_ENTRY":
+        if int(row.get("waited",0)) >= max_wait:
+            row.update(status="EXPIRED", exit_day=day.isoformat(), exit_reason="Batas 5 sesi menunggu habis")
+            return row, "EXPIRED"
         row["waited"] = int(row.get("waited",0))+1
         if not low <= entry <= high:
             if row["waited"] >= max_wait:
-                row.update(status="EXPIRED", exit_day=day.isoformat())
+                row.update(status="EXPIRED", exit_day=day.isoformat(), exit_reason="Harga entry belum tersentuh dalam 5 sesi")
                 return row, "EXPIRED"
             return row, "WAIT_ENTRY"
         row.update(status="OPEN",entry_day=day.isoformat())

@@ -7,6 +7,7 @@ on weekdays. Paper entries and exits are evaluated from completed daily bars.
 Scanner state is in-memory and lost on service restart. The paper runner
 persists daily-bar simulations separately. No live order or IndexAlpha quota.
 """
+from daily_paper_logic import candidate_decision
 import math
 import os
 import threading
@@ -97,7 +98,8 @@ def _run_once(scan_one, now, on_scan=None):
          "setup": str(row.get("setup") or "Netral"),
          "signal_date": str(row["signal_date"]),
          "source": "PREVIOUS_COMPLETED_DAILY_BAR",
-         "paper_entry_signal": False}
+         "paper_plan_eligible": candidate_decision(row)["eligible"],
+         "paper_plan_reason": candidate_decision(row)["reason"]}
         for score, row in ranked[:3]
     ]
     with _lock:

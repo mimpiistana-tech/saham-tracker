@@ -21,11 +21,27 @@ def status():
     from daily_paper_runner import summary as paper_summary
     paper = paper_summary()
     from daily_paper_runner import waiting_entries
-    pending_entries = [
-        {"ticker": str(order.get("ticker") or "").upper(),
-         "signal_day": str(order.get("signal_day") or "")}
-        for order in waiting_entries()
-    ]
+    from daily_paper_logic import normalize_waiting_order, MAX_WAIT_SESSIONS
+    pending_entries = []
+    for order in waiting_entries():
+        waited = int(order.get("waited") or 0)
+        preview = normalize_waiting_order(order)
+        changed = any(preview.get(k) != order.get(k) for k in
+                      ("entry","cut_loss","tp1","tp2","lots","status"))
+        reason = ("Batas sesi habis; menunggu siklus harian untuk kedaluwarsa" if waited >= MAX_WAIT_SESSIONS
+                  else "Harga entry belum tersentuh pada candle yang sudah diproses" if waited
+                  else "Menunggu candle selesai setelah tanggal sinyal")
+        pending_entries.append({
+            **{k:order.get(k) for k in ("ticker","signal_day","entry","cut_loss","tp1","tp2",
+                                       "mode","last_bar_day","last_bar_low","last_bar_high","lots")},
+            "waited_sessions":waited, "max_wait_sessions":MAX_WAIT_SESSIONS,
+            "remaining_sessions":max(0,MAX_WAIT_SESSIONS-waited),
+            "waiting_reason":reason,
+            "rounding_pending":changed,
+            "next_session_levels":({k:preview.get(k) for k in
+                                    ("entry","cut_loss","tp1","tp2","lots","status","exit_reason")}
+                                   if changed else None),
+        })
     return jsonify(
         success=True,
         paper_only=True,

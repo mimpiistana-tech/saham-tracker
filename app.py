@@ -544,6 +544,11 @@ def build_scanner_item_from_rows(ticker, rows, cache_state="HIST"):
 
     paper_tp1 = entry_mid + (1.50 * atr14)
     paper_tp2 = entry_mid + (3.00 * atr14)
+    from daily_paper_logic import rounded_levels
+    levels = rounded_levels({"entry":entry_mid, "cut_loss":paper_cut_loss,
+                             "tp1":paper_tp1, "tp2":paper_tp2}, entry_mode)
+    entry_mid, paper_cut_loss, paper_tp1, paper_tp2 = (
+        levels[k] for k in ("entry","cut_loss","tp1","tp2"))
 
     return {
         "ticker": ticker,

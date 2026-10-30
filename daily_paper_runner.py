@@ -11,7 +11,7 @@ from contextlib import closing
 from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
-from daily_paper_logic import apply_bar, good_bar, planned_order
+from daily_paper_logic import apply_bar, good_bar, planned_order, candidate_decision, MAX_WAIT_SESSIONS
 from paper_storage import storage_health
 
 WIB = ZoneInfo("Asia/Jakarta")
@@ -38,6 +38,7 @@ def _connection():
         session_cutoff TEXT PRIMARY KEY, finished_at TEXT NOT NULL,
         valid_tickers INTEGER NOT NULL, created INTEGER NOT NULL,
         advanced INTEGER NOT NULL)""")
+    db.execute("CREATE TABLE IF NOT EXISTS daily_paper_decisions (ticker TEXT PRIMARY KEY, payload TEXT NOT NULL)")
     db.commit()
     return db
 
@@ -94,6 +95,9 @@ def run_cycle(items, cutoff, load_bars, *, watch):
                 conn.rollback()
                 return {"ran":False,"reason":"already_processed"}
             created, advanced = 0, 0
+            decisions = {ticker: {"ticker":ticker, "session_asof":cutoff,
+                "eligible":False, "reason":"Data harian / kandidat tidak tersedia", "reasons":["Data harian / kandidat tidak tersedia"]}
+                for ticker in watch}
             for ticker, candles in bars_by_ticker.items():
                 old_rows = conn.execute(
                     "SELECT id,payload FROM daily_paper_trades WHERE ticker=? AND status IN (?,?,?)",
@@ -117,25 +121,34 @@ def run_cycle(items, cutoff, load_bars, *, watch):
                     continue
                 # Ensure timestamp exactly matches the last usable closed session.
                 if item.get("signal_date") != candles[-1]["date"]:
+                    decisions[ticker]["reason"] = "Tanggal sinyal tidak cocok dengan candle terakhir"
                     continue
+                decisions[ticker] = {"ticker":ticker, "session_asof":cutoff,
+                    "signal_date":item.get("signal_date"),
+                    "score":item.get("score"), "volume_ratio":item.get("volume_ratio"),
+                    **candidate_decision(item)}
                 plan = planned_order(item)
                 if plan is None:
                     continue
                 if conn.execute("SELECT 1 FROM daily_paper_trades WHERE id=?", (plan["signal_id"],)).fetchone():
+                    decisions[ticker]["reason"] = "Sinyal ini sudah dicatat; tidak membuat duplikat"
                     continue
                 existing = conn.execute(
                     "SELECT 1 FROM daily_paper_trades WHERE ticker=? AND status IN (?,?,?)",
                     (ticker,*STATUSES)).fetchone()
                 if existing:
+                    decisions[ticker]["reason"] = "Masih ada rencana / posisi aktif untuk saham ini"
                     continue
                 opened = conn.execute(
                     "SELECT payload FROM daily_paper_trades WHERE status IN (?,?,?)",
                     STATUSES).fetchall()
                 if len(opened) >= 3:
+                    decisions[ticker]["reason"] = "Batas 3 rencana / posisi aktif tercapai"
                     continue
                 committed_value = sum(
                     float(json.loads(x[0]).get("paper_value") or 0) for x in opened)
                 if committed_value + plan["paper_value"] > 10_000_000:
+                    decisions[ticker]["reason"] = "Batas modal paper Rp10 juta tercapai"
                     continue
                 conn.execute(
                     "INSERT INTO daily_paper_trades (id,ticker,status,payload) VALUES (?,?,?,?)",
@@ -145,6 +158,10 @@ def run_cycle(items, cutoff, load_bars, *, watch):
                     "(signal_id,session_date,event,payload) VALUES (?,?,?,?)",
                     (plan["signal_id"],plan["signal_day"],"PAPER_PLAN",json.dumps(plan)))
                 created += 1
+            for decision in decisions.values():
+                decision["reasons"] = [decision["reason"]]
+                conn.execute("INSERT OR REPLACE INTO daily_paper_decisions VALUES (?,?)",
+                             (decision["ticker"],json.dumps(decision)))
             conn.execute(
                 "INSERT INTO daily_paper_cycles VALUES (?,?,?,?,?)",
                 (cutoff,datetime.now(timezone.utc).isoformat(),len(bars_by_ticker),created,advanced))
@@ -265,6 +282,7 @@ def summary():
             "last_error":LAST["last_error"], "mode":"daily_completed_bars_only",
             "entry_mode":"completed_daily_bar_touch",
             "no_live_orders":True,"positions_on_server":False,
+            "max_wait_sessions":MAX_WAIT_SESSIONS, "candidate_decisions":[], "recent_expired":[],
             "counts":{key:0 for key in ("WAIT_ENTRY","OPEN","TP1_HIT","CL","TP2","TIME","EXPIRED")}}
     if not storage_health()["ready"]:
         return info
@@ -273,6 +291,11 @@ def summary():
             for status,count in conn.execute("SELECT status,COUNT(*) FROM daily_paper_trades GROUP BY status"):
                 if status in info["counts"]:
                     info["counts"][status] = count
+            info["candidate_decisions"] = [json.loads(x[0]) for x in conn.execute(
+                "SELECT payload FROM daily_paper_decisions ORDER BY ticker")]
+            info["recent_expired"] = [
+                {k: json.loads(x[0]).get(k) for k in ("ticker","signal_day","exit_day","exit_reason","waited")}
+                for x in conn.execute("SELECT payload FROM daily_paper_trades WHERE status='EXPIRED' ORDER BY rowid DESC LIMIT 5")]
             latest = conn.execute(
                 "SELECT session_cutoff,finished_at,valid_tickers,created,advanced "
                 "FROM daily_paper_cycles ORDER BY session_cutoff DESC LIMIT 1").fetchone()
